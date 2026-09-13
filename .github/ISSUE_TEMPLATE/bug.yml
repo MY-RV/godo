@@ -1,0 +1,25 @@
+name: Bug report
+description: Something broken or unexpected
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Expected vs actual
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: Minimal steps, godo.yaml snippet, OS/arch, godo --version
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: godo version
+      placeholder: "0.1.0"
+    validations:
+      required: true

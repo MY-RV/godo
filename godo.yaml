@@ -1,0 +1,22 @@
+version: "0.1"
+
+scripts:
+  test: go test ./...
+  vet: go vet ./...
+  race: go test -race ./...
+  staticcheck: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+  fuzz: go test -fuzz=FuzzExpand -fuzztime=5s ./internal/expand
+
+  # ./godo for dogfood
+  build: go build -o godo ./cmd/godo
+
+  # local gate
+  # @deps vet, test
+  check: go build -o godo ./cmd/godo
+
+  # no upload
+  release-local: ./scripts/release-local.sh
+
+  # bootstrap: go build -o godo && ./godo ci
+  # @deps vet, test, race, staticcheck, fuzz, build
+  ci: "true"
