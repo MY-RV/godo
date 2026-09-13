@@ -13,11 +13,15 @@ godo -e version
 ## Install
 
 ```bash
+brew install MY-RV/tap/godo
+```
+
+```bash
 go install github.com/my-rv/godo/cmd/godo@latest
 ```
 
 Binaries (no Go): [docs/install.md](./docs/install.md).  
-Brew / Scoop (after v0.1): [docs/distribution.md](./docs/distribution.md).
+Scoop: [docs/distribution.md](./docs/distribution.md).
 
 ## Library
 

@@ -36,12 +36,16 @@ go build -ldflags "-X github.com/my-rv/godo.Version=v0.1.0" -o godo ./cmd/godo
 
 ## Package managers
 
-v0.1 ships via Releases. Planned family installs (not required for first tag):
-
 ```bash
-brew install MY-RV/tap/godo          # after MY-RV/homebrew-tap exists
-scoop install godo                   # after MY-RV/scoop-bucket exists
+brew install MY-RV/tap/godo
 ```
+
+```powershell
+scoop bucket add my-rv https://github.com/MY-RV/scoop-bucket
+scoop install godo
+```
+
+On recent Homebrew, third-party taps may need `brew trust MY-RV/tap` once before install.
 
 See [distribution.md](./distribution.md).
 
