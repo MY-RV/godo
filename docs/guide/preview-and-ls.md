@@ -86,7 +86,7 @@ godo: no script matching tokens: [no-such]
 ```yaml
 scripts:
   # @dialect matcher
-  "run ${GRP} ${SCR}": go run ./scripts/${GRP}/${SCR} ${godo:args}
+  "run ${GRP} ${SCR}": go run ./scripts/${godo:argv[GRP]}/${godo:argv[SCR]} ${godo:args}
 ```
 
 ```bash
@@ -100,7 +100,7 @@ godo --ls run _ _
 ```text
 @dialect matcher
 run ${GRP} ${SCR}:
-  go run ./scripts/${GRP}/${SCR} ${godo:args}
+  go run ./scripts/${godo:argv[GRP]}/${godo:argv[SCR]} ${godo:args}
 ```
 
 Wrong arity fails (two tokens do not match `run ${GRP} ${SCR}`):
@@ -117,7 +117,7 @@ godo: no script matching tokens: [_ _]
 
 ## Preview (expand, do not run)
 
-`--preview` prints every shell line that would run, **after** `@deps` and `${…}` expansion, one line per command.
+`--preview` prints every shell line that would run, **after** `@deps` and `${godo:…}` expansion, one line per command.
 
 ```bash
 godo --preview check
@@ -146,11 +146,11 @@ go run ./scripts/db/migrate --dry
 Unknown placeholder fails closed (same as a real run):
 
 ```bash
-godo --preview bad   # body: echo ${nope}
+godo --preview bad   # body: echo ${godo:argv[nope]}
 ```
 
 ```text
-godo: unknown capture ${nope}
+godo: unknown capture "nope" (not bound by the matcher key)
 ```
 
 ## Next

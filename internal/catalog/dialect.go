@@ -2,10 +2,14 @@ package catalog
 
 import "fmt"
 
-// Dialect matches tokens against catalog scripts (Strategy).
+// Dialect decides whether one script answers to tokens (Strategy).
+//
+// Candidate order is the engine's business: it walks the catalog in definition
+// order and asks each dialect about a single script, so "first match wins" means
+// the same thing whatever dialect a script declares.
 type Dialect interface {
 	Name() DialectName
-	Match(scripts []Script, tokens []string) (*Match, error)
+	Match(script Script, tokens []string) (*Match, error)
 }
 
 // DialectRegistry maps dialect names to implementations (Open/Closed).

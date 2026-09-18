@@ -1,3 +1,26 @@
+// Package expand resolves godo placeholders before the host shell sees a line.
+//
+// godo works in two spaces, and each has its own syntax:
+//
+//	godo space   matcher keys and @deps entries. No shell is ever involved, so
+//	             bare ${NAME} is a capture and values keep their token
+//	             boundaries verbatim.
+//	shell space  script bodies. The text belongs to the host shell, so godo
+//	             claims only the ${godo:…} namespace and leaves every bare
+//	             ${…} alone — "echo ${HOME}" reaches the shell untouched.
+//
+// Body grammar:
+//
+//	${godo:argv[NAME]}     capture bound by the matcher key
+//	${godo:args}           all remaining args, space-joined
+//	${godo:args[i]}        one remaining arg (0-based)
+//	${godo:args[i..j]}     half-open slice [i,j) (Go semantics)
+//	${…:raw}               any of the above, unquoted
+//
+// Values are shell-quoted by default: one argument in is one argument out,
+// whatever it contains. The ":raw" suffix opts a single placeholder back into
+// verbatim interpolation, for the cases where a glob or a shell construct is
+// the point.
 package expand
 
 import (
@@ -7,97 +30,225 @@ import (
 	"strings"
 )
 
+// namespace is the only thing godo claims inside a script body.
+const namespace = "${godo:"
+
 var (
-	reArgsSlice  = regexp.MustCompile(`\$\{godo:args\[(\d+)\.\.(\d+)\]\}`)
-	reArgsIndex  = regexp.MustCompile(`\$\{godo:args\[(\d+)\]\}`)
-	reArgsAll    = regexp.MustCompile(`\$\{godo:args\}`)
-	reAnyPlace   = regexp.MustCompile(`\$\{([^}]*)\}`)
-	reValidCap   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	reValidCap  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	reArgsIndex = regexp.MustCompile(`^args\[(\d+)\]$`)
+	reArgsSlice = regexp.MustCompile(`^args\[(\d+)\.\.(\d+)\]$`)
+	reArgv      = regexp.MustCompile(`^argv\[([^\]]*)\]$`)
+	reDigits    = regexp.MustCompile(`^\d+$`)
 )
 
-// HasArgsPlaceholder reports whether s references ${godo:args…}.
-func HasArgsPlaceholder(s string) bool {
-	return reArgsAll.MatchString(s) || reArgsIndex.MatchString(s) || reArgsSlice.MatchString(s)
+// segment is one lexed piece of a body: literal text, or the spec of a
+// ${godo:…} placeholder with the namespace prefix already stripped.
+type segment struct {
+	literal string
+	spec    string
+	isPlace bool
 }
 
-// CommandsNeedArgs is true if any command uses ${godo:args…}.
-func CommandsNeedArgs(cmds []string) bool {
-	for _, c := range cmds {
-		if HasArgsPlaceholder(c) {
+// lexBody splits a script body into literal and placeholder segments. Only
+// ${godo:…} is a placeholder; everything else, bare ${…} included, is literal.
+func lexBody(template string) ([]segment, error) {
+	var segs []segment
+	rest := template
+	for {
+		i := strings.Index(rest, namespace)
+		if i < 0 {
+			break
+		}
+		end := strings.IndexByte(rest[i:], '}')
+		if end < 0 {
+			return nil, fmt.Errorf("unterminated placeholder %q", rest[i:])
+		}
+		if i > 0 {
+			segs = append(segs, segment{literal: rest[:i]})
+		}
+		segs = append(segs, segment{spec: rest[i+len(namespace) : i+end], isPlace: true})
+		rest = rest[i+end+1:]
+	}
+	if rest != "" {
+		segs = append(segs, segment{literal: rest})
+	}
+	return segs, nil
+}
+
+// hasArgsPlaceholder reports whether s references ${godo:args…}.
+func hasArgsPlaceholder(s string) bool {
+	segs, err := lexBody(s)
+	if err != nil {
+		return false
+	}
+	for _, seg := range segs {
+		if seg.isPlace && strings.HasPrefix(strings.TrimSuffix(seg.spec, ":raw"), "args") {
 			return true
 		}
 	}
 	return false
 }
 
-// Expand applies captures and godo args placeholders in-process.
+// CommandsNeedArgs is true if any command uses ${godo:args…}.
+func CommandsNeedArgs(cmds []string) bool {
+	for _, c := range cmds {
+		if hasArgsPlaceholder(c) {
+			return true
+		}
+	}
+	return false
+}
+
+// Expand resolves a script body (shell space).
 //
-// ${godo:args[i..j]} uses half-open [i,j) (Go slice semantics).
-// Out-of-range ${godo:args[i]} is an error. Unknown/invalid ${name} is an error.
+// Values are shell-quoted unless the placeholder carries the ":raw" suffix.
+// Out-of-range args and unknown captures are errors — expansion fails closed
+// rather than emitting an empty string. Bare ${…} is never touched.
 func Expand(template string, captures map[string]string, args []string) (string, error) {
-	var err error
-	out := template
-
-	out = reArgsSlice.ReplaceAllStringFunc(out, func(m string) string {
-		if err != nil {
-			return m
-		}
-		sub := reArgsSlice.FindStringSubmatch(m)
-		i, _ := strconv.Atoi(sub[1])
-		j, _ := strconv.Atoi(sub[2])
-		if i < 0 || j < i {
-			err = fmt.Errorf("invalid args slice [%d..%d)", i, j)
-			return m
-		}
-		return strings.Join(safeSlice(args, i, j), " ")
-	})
+	segs, err := lexBody(template)
 	if err != nil {
 		return "", err
 	}
-
-	out = reArgsIndex.ReplaceAllStringFunc(out, func(m string) string {
+	var out strings.Builder
+	for _, seg := range segs {
+		if !seg.isPlace {
+			out.WriteString(seg.literal)
+			continue
+		}
+		v, err := resolve(seg.spec, captures, args)
 		if err != nil {
-			return m
+			return "", err
 		}
-		sub := reArgsIndex.FindStringSubmatch(m)
-		i, _ := strconv.Atoi(sub[1])
-		if i < 0 || i >= len(args) {
-			err = fmt.Errorf("${godo:args[%d]} out of range (len=%d)", i, len(args))
-			return m
-		}
-		return args[i]
-	})
-	if err != nil {
-		return "", err
+		out.WriteString(v)
 	}
+	return out.String(), nil
+}
 
-	out = reArgsAll.ReplaceAllString(out, strings.Join(args, " "))
-
-	out = reAnyPlace.ReplaceAllStringFunc(out, func(m string) string {
+// ExpandAll expands each body template.
+func ExpandAll(templates []string, captures map[string]string, args []string) ([]string, error) {
+	out := make([]string, len(templates))
+	for i, t := range templates {
+		e, err := Expand(t, captures, args)
 		if err != nil {
-			return m
+			return nil, err
 		}
-		inner := reAnyPlace.FindStringSubmatch(m)[1]
-		if strings.HasPrefix(inner, "godo:") {
-			err = fmt.Errorf("unhandled placeholder %s", m)
-			return m
+		out[i] = e
+	}
+	return out, nil
+}
+
+// ExpandInvocation resolves a @deps entry (godo space) into tokens.
+//
+// Bare ${NAME} is a capture. Nothing is shell-quoted and nothing is re-split:
+// one word in the entry is one token out, so a capture holding a space stays a
+// single token instead of fragmenting the invocation.
+func ExpandInvocation(line string, captures map[string]string) ([]string, error) {
+	var tokens []string
+	for _, word := range strings.Fields(line) {
+		tok, err := expandWord(word, captures)
+		if err != nil {
+			return nil, err
 		}
-		if !reValidCap.MatchString(inner) {
-			err = fmt.Errorf("invalid capture name %q", inner)
-			return m
+		tokens = append(tokens, tok)
+	}
+	return tokens, nil
+}
+
+func expandWord(word string, captures map[string]string) (string, error) {
+	var out strings.Builder
+	rest := word
+	for {
+		i := strings.Index(rest, "${")
+		if i < 0 {
+			break
 		}
-		if captures == nil {
-			err = fmt.Errorf("unknown capture ${%s}", inner)
-			return m
+		end := strings.IndexByte(rest[i:], '}')
+		if end < 0 {
+			return "", fmt.Errorf("unterminated placeholder %q", rest[i:])
 		}
-		v, ok := captures[inner]
-		if !ok {
-			err = fmt.Errorf("unknown capture ${%s}", inner)
-			return m
+		name := rest[i+2 : i+end]
+		if strings.HasPrefix(name, "godo:") {
+			return "", fmt.Errorf("${%s} is not available in @deps; deps are godo space, write ${NAME} for a capture", name)
 		}
-		return v
-	})
-	return out, err
+		v, err := lookupCapture(name, captures)
+		if err != nil {
+			return "", err
+		}
+		out.WriteString(rest[:i])
+		out.WriteString(v)
+		rest = rest[i+end+1:]
+	}
+	out.WriteString(rest)
+	return out.String(), nil
+}
+
+// resolve turns one body placeholder spec into its replacement text.
+func resolve(spec string, captures map[string]string, args []string) (string, error) {
+	name, raw := spec, false
+	if trimmed, ok := strings.CutSuffix(spec, ":raw"); ok {
+		name, raw = trimmed, true
+	}
+	if name == "args" {
+		return joinArgs(args, raw), nil
+	}
+	if m := reArgsIndex.FindStringSubmatch(name); m != nil {
+		i, err := strconv.Atoi(m[1])
+		if err != nil || i >= len(args) {
+			return "", fmt.Errorf("${godo:args[%s]} out of range (len=%d)", m[1], len(args))
+		}
+		return quoteUnless(raw, args[i]), nil
+	}
+	if m := reArgsSlice.FindStringSubmatch(name); m != nil {
+		i, errI := strconv.Atoi(m[1])
+		j, errJ := strconv.Atoi(m[2])
+		if errI != nil || errJ != nil || j < i {
+			return "", fmt.Errorf("invalid args slice [%s..%s)", m[1], m[2])
+		}
+		return joinArgs(safeSlice(args, i, j), raw), nil
+	}
+	if m := reArgv.FindStringSubmatch(name); m != nil {
+		if reDigits.MatchString(m[1]) {
+			return "", fmt.Errorf("${godo:argv[%s]} indexes captures by name; for a positional argument use ${godo:args[%s]}", m[1], m[1])
+		}
+		v, err := lookupCapture(m[1], captures)
+		if err != nil {
+			return "", err
+		}
+		return quoteUnless(raw, v), nil
+	}
+	if name == "argv" {
+		return "", fmt.Errorf("${godo:argv} needs a capture name, as ${godo:argv[NAME]}; for all remaining arguments use ${godo:args}")
+	}
+	return "", fmt.Errorf("unhandled placeholder ${godo:%s}", name)
+}
+
+func lookupCapture(name string, captures map[string]string) (string, error) {
+	if !reValidCap.MatchString(name) {
+		return "", fmt.Errorf("invalid capture name %q (want [A-Za-z_][A-Za-z0-9_]*)", name)
+	}
+	v, ok := captures[name]
+	if !ok {
+		return "", fmt.Errorf("unknown capture %q (not bound by the matcher key)", name)
+	}
+	return v, nil
+}
+
+func joinArgs(args []string, raw bool) string {
+	if raw {
+		return strings.Join(args, " ")
+	}
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = Quote(a)
+	}
+	return strings.Join(quoted, " ")
+}
+
+func quoteUnless(raw bool, s string) string {
+	if raw {
+		return s
+	}
+	return Quote(s)
 }
 
 func safeSlice(args []string, i, j int) []string {
@@ -111,17 +262,4 @@ func safeSlice(args []string, i, j int) []string {
 		return nil
 	}
 	return args[i:j]
-}
-
-// ExpandAll expands each template.
-func ExpandAll(templates []string, captures map[string]string, args []string) ([]string, error) {
-	out := make([]string, len(templates))
-	for i, t := range templates {
-		e, err := Expand(t, captures, args)
-		if err != nil {
-			return nil, err
-		}
-		out[i] = e
-	}
-	return out, nil
 }

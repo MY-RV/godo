@@ -65,7 +65,7 @@ func (e *Engine) Resolve(tokens []string) (*Match, error) {
 			// Skip scripts whose dialect is not registered (should be rare after load validation).
 			continue
 		}
-		m, err := d.Match([]Script{s}, tokens)
+		m, err := d.Match(s, tokens)
 		if err != nil {
 			if errors.Is(err, ErrNoMatch) || errors.Is(err, ErrNoTokens) {
 				continue
@@ -92,7 +92,11 @@ type PlanStep struct {
 }
 
 // BuildPlan expands deps + body without executing.
-// Deps form a tree: diamond dependencies may run more than once (no DAG dedup).
+//
+// Deps form a DAG: an invocation that several scripts depend on is emitted once,
+// at its first (deepest-first) position, so a diamond does not duplicate work.
+// Invocations are keyed by their expanded token line, so the same script reached
+// with different captures is a different node.
 func (e *Engine) BuildPlan(tokens []string) (*Plan, error) {
 	m, err := e.Resolve(tokens)
 	if err != nil {
@@ -103,7 +107,8 @@ func (e *Engine) BuildPlan(tokens []string) (*Plan, error) {
 	}
 	plan := &Plan{Match: m}
 	stack := map[string]bool{}
-	if err := e.appendDeps(plan, m, stack); err != nil {
+	done := map[string]bool{}
+	if err := e.appendDeps(plan, m, stack, done); err != nil {
 		return nil, err
 	}
 	cmds, err := expand.ExpandAll(m.Script.Commands, m.Captures, m.Args)
@@ -124,16 +129,19 @@ func validateArgs(m *Match) error {
 	return nil
 }
 
-func (e *Engine) appendDeps(plan *Plan, m *Match, stack map[string]bool) error {
+// appendDeps walks m's dependencies depth-first.
+//
+// stack holds the current path and catches cycles; done spans the whole plan and
+// collapses repeats. A node leaves stack once emitted but stays in done, so a
+// re-visit is a skip while a re-entry is still a cycle.
+func (e *Engine) appendDeps(plan *Plan, m *Match, stack, done map[string]bool) error {
 	for _, dep := range m.Script.Deps {
-		if expand.HasArgsPlaceholder(dep) {
-			return fmt.Errorf("deps must not use ${godo:args}")
-		}
-		expandedDep, err := expand.Expand(dep, m.Captures, nil)
+		// A @deps entry is godo space: bare ${NAME} is a capture, and it resolves
+		// to tokens rather than to a line that would have to be re-split.
+		depTokens, err := expand.ExpandInvocation(dep, m.Captures)
 		if err != nil {
-			return fmt.Errorf("deps: %w", err)
+			return fmt.Errorf("deps %q: %w", dep, err)
 		}
-		depTokens := strings.Fields(expandedDep)
 		if len(depTokens) == 0 {
 			continue
 		}
@@ -141,16 +149,19 @@ func (e *Engine) appendDeps(plan *Plan, m *Match, stack map[string]bool) error {
 		if stack[invKey] {
 			return fmt.Errorf("%w: involving %q", ErrDependencyCycle, invKey)
 		}
+		if done[invKey] {
+			continue
+		}
 		stack[invKey] = true
 
 		depMatch, err := e.Resolve(depTokens)
 		if err != nil {
-			return fmt.Errorf("deps %q: %w", expandedDep, err)
+			return fmt.Errorf("deps %q: %w", invKey, err)
 		}
 		if err := validateArgs(depMatch); err != nil {
 			return err
 		}
-		if err := e.appendDeps(plan, depMatch, stack); err != nil {
+		if err := e.appendDeps(plan, depMatch, stack, done); err != nil {
 			return err
 		}
 		cmds, err := expand.ExpandAll(depMatch.Script.Commands, depMatch.Captures, depMatch.Args)
@@ -161,6 +172,7 @@ func (e *Engine) appendDeps(plan *Plan, m *Match, stack map[string]bool) error {
 			plan.Steps = append(plan.Steps, PlanStep{Kind: "dep", Source: invKey, Command: c})
 		}
 		delete(stack, invKey)
+		done[invKey] = true
 	}
 	return nil
 }
