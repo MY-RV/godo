@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-19
+
 Breaking. Placeholder syntax inside script bodies changed; catalogs need editing.
 Full rules in [docs/contract.md](./docs/contract.md).
 

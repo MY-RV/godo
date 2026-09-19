@@ -39,7 +39,7 @@ godo --update-check
 
 ```text
 current: 0.1.0-dev
-latest:  v0.1.0
+latest:  v0.2.0
 already up to date
 ```
 

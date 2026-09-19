@@ -25,13 +25,13 @@ Override Releases API (tests/mirrors): `GODO_RELEASES_API`.
 ```bash
 go install github.com/my-rv/godo/cmd/godo@latest
 # pin:
-go install github.com/my-rv/godo/cmd/godo@v0.1.0
+go install github.com/my-rv/godo/cmd/godo@v0.2.0
 ```
 
 Local build:
 
 ```bash
-go build -ldflags "-X github.com/my-rv/godo.Version=v0.1.0" -o godo ./cmd/godo
+go build -ldflags "-X github.com/my-rv/godo.Version=v0.2.0" -o godo ./cmd/godo
 ```
 
 ## Package managers
