@@ -113,7 +113,7 @@ func TestE2E_failClosedUnknownPlaceholder(t *testing.T) {
 	writeGodoYAML(t, cwd, `version: "0.1"
 dialect: package
 scripts:
-  bad: echo ${nope}
+  bad: echo ${godo:argv[nope]}
 `)
 	app, _, _ := e2eApp(t, cwd)
 	if err := app.Run([]string{"--preview", "bad"}); err == nil {

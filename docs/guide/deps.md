@@ -71,7 +71,7 @@ echo ship --prod
 
 **No `${godo:args}` inside `@deps`.** Use captures already bound by a matcher key instead (`lint ${MODULE}`).
 
-**Cycles error.** Diamond graphs may run a shared node more than once (no DAG dedup):
+**Cycles error.** Deps form a DAG: a node several scripts depend on runs **once**, at its first (deepest-first) position.
 
 ```yaml
 scripts:
@@ -91,9 +91,12 @@ godo --preview root
 ```text
 echo leaf
 echo mid
-echo leaf
 echo root
 ```
+
+Dedup keys on the **expanded** invocation, not the script, so a matcher dep
+reached with different captures stays distinct — `@deps lint pay, lint auth`
+runs both.
 
 ## Next
 

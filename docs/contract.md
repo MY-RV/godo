@@ -68,20 +68,43 @@ File default. Scripts may override with `# @dialect`.
 
 ## Bind
 
-Godo expands placeholders **in-process** before `exec` / preview. No host-shell bind (`$VAR` / `%VAR%`).
+Godo expands placeholders **in-process** before `exec` / preview, in two spaces:
 
-| Placeholder | |
-|-------------|--|
-| `${name}` | Capture; `name` = `[A-Za-z_][A-Za-z0-9_]*` (fail-closed if invalid) |
+| Space | Where | Syntax | Meets a shell |
+|-------|-------|--------|---------------|
+| godo | matcher keys, `@deps` | `${NAME}` | never |
+| shell | script bodies | `${godo:…}` | always |
+
+In a body godo claims **only** `${godo:…}`. Every other `${…}` is shell text and
+is passed through untouched — `${HOME}` and `$$` are the host
+shell's, never a catalog bind. Collision is structurally impossible, so there is
+no escape syntax.
+
+| Body placeholder | |
+|------------------|--|
+| `${godo:argv[NAME]}` | Capture; `NAME` = `[A-Za-z_][A-Za-z0-9_]*` (fail-closed if unbound or invalid) |
 | `${godo:args}` | Remaining tokens (space-joined) |
 | `${godo:args[i]}` | One token; **error** if out of range |
 | `${godo:args[i..j]}` | Half-open slice `[i,j)` (Go style) |
+| `${godo:…:raw}` | Any of the above, interpolated verbatim (no quoting) |
+
+`${godo:argv[i]}` with a number is an error pointing at `${godo:args[i]}`.
+`${godo:…}` inside a matcher key or a `@deps` entry is rejected.
+
+Expanded values are **shell-quoted** for the host shell (`sh` / `cmd`): one
+argument in is one argument out. `:raw` opts a single placeholder out.
+
+Windows caveat: `cmd.exe` expands `%VAR%` and `!VAR!` before a command sees its
+arguments, and no quoting on the command line fully suppresses that.
 
 ## Exec cwd
 
 Commands run with working directory = **directory of the resolved `godo.yaml`** (not necessarily the caller’s cwd). Relative paths in the catalog stay stable from subdirs.
 
-Trust: expanded lines pass through the host shell (`sh -c` / `cmd /C`).
+Trust: expanded lines pass through the host shell (`sh -c` / `cmd /C`). Catalog
+text is trusted — it is repo code. Values substituted into it are quoted, so
+arguments and captures are data, not shell syntax; `${godo:…:raw}` waives that for one
+placeholder and puts the trust decision back on the catalog author.
 
 ## Script decorators (JSDoc style)
 
@@ -103,17 +126,18 @@ ci: go build ./...
 ```yaml
 # @deps lint ${MODULE}
 # @dialect matcher
-test ${MODULE}: go test ./${MODULE}/...
+test ${MODULE}: go test ./${godo:argv[MODULE]}/...
 ```
 
 - `@dialect` — per-script override; without it, uses `{file}.dialect`
 - `@deps` / `@dependencies` — invocation like `godo …` (space-separated tokens; entries separated by `,`)
-- literals and `${name}` from captures **already bound** by the match
-- no `${godo:args}` / slices in `@deps`
+- literals and bare `${NAME}` from captures **already bound** by the match (godo space)
+- no `${godo:…}` in `@deps`; entries resolve to tokens, so a capture holding a space stays one token
 - order = list order; stop on first failure
 - cycle → error (on the **expanded** invocation)
 - caller args are **not** forwarded to deps
-- diamond (A→B,C and B→C): C may run more than once (**no** DAG dedup)
+- diamond (A→B,C and B→C): C runs **once**, at its first (deepest-first) position
+- dedup keys on the **expanded** invocation, so `lint pay` and `lint auth` are distinct nodes
 - `--preview`: deps + body, in order (deps already expanded)
 - no `@` → no deps (manual composition via `godo …` in the value remains valid)
 
@@ -156,7 +180,7 @@ scripts:
 ## Dialect `matcher`
 
 Keys = routes over tokens (Express-style). First match in (definition order).  
-`${name}` = capture; the user chooses the name.
+`${NAME}` = capture; the user chooses the name. Consume it in the body as `${godo:argv[NAME]}`.
 
 ```
 scripts.<pattern>: string | string[]
@@ -169,7 +193,7 @@ dialect: matcher
 scripts:
   "${GRP} ${SCR}": go run -C scripts/${GRP}/${SCR} . ${godo:args}
   # @deps lint ${MODULE}
-  test ${MODULE}: go test ./${MODULE}/...
+  test ${MODULE}: go test ./${godo:argv[MODULE]}/...
   test: go test ./...
   seed: go run -C scripts/service/seed . ${godo:args}
 ```

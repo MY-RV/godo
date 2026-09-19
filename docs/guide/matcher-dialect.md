@@ -9,7 +9,7 @@ version: "0.1"
 dialect: matcher
 
 scripts:
-  test ${MODULE}: go test ./${MODULE}/...
+  test ${MODULE}: go test ./${godo:argv[MODULE]}/...
   test: go test ./...
 ```
 
@@ -37,9 +37,9 @@ go test ./...
 
 ```yaml
 scripts:
-  lint ${MODULE}: go run ./lint ${MODULE}
+  lint ${MODULE}: go run ./lint ${godo:argv[MODULE]}
   # @deps lint ${MODULE}
-  test ${MODULE}: go test ./${MODULE}/...
+  test ${MODULE}: go test ./${godo:argv[MODULE]}/...
 ```
 
 ```bash
@@ -60,7 +60,7 @@ version: "0.1"
 
 scripts:
   # @dialect matcher
-  "run ${GRP} ${SCR}": go run ./scripts/${GRP}/${SCR} ${godo:args}
+  "run ${GRP} ${SCR}": go run ./scripts/${godo:argv[GRP]}/${godo:argv[SCR]} ${godo:args}
 ```
 
 ```bash
@@ -72,7 +72,7 @@ godo --ls run _ _
 ```text
 @dialect matcher
 run ${GRP} ${SCR}:
-  go run ./scripts/${GRP}/${SCR} ${godo:args}
+  go run ./scripts/${godo:argv[GRP]}/${godo:argv[SCR]} ${godo:args}
 ```
 
 ```bash

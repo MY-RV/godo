@@ -247,8 +247,8 @@ scripts:
 dialect: matcher
 scripts:
   # @deps lint ${MODULE}
-  test ${MODULE}: echo test-${MODULE}
-  lint ${MODULE}: echo lint-${MODULE}
+  test ${MODULE}: echo test-${godo:argv[MODULE]}
+  lint ${MODULE}: echo lint-${godo:argv[MODULE]}
 `)
 	cat, _ = catalog.LoadFile(filepath.Join(dir, "godo.yaml"))
 	ran = nil
@@ -275,7 +275,7 @@ dialect: package
 scripts:
   test: echo unit
   # @dialect matcher
-  "${GRP} ${SCR}": echo ${GRP}/${SCR} ${godo:args}
+  "${GRP} ${SCR}": echo ${godo:argv[GRP]}/${godo:argv[SCR]} ${godo:args}
 `)
 	cat, err := catalog.LoadFile(filepath.Join(dir, "godo.yaml"))
 	if err != nil {
@@ -315,5 +315,80 @@ scripts:
 `), "x")
 	if err == nil || !strings.Contains(err.Error(), "nscript") {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestEngine_depsDiamondRunsOnce(t *testing.T) {
+	root := t.TempDir()
+	writeCat(t, root, `version: "0.1"
+scripts:
+  build: echo build
+
+  # @deps build
+  test: echo test
+
+  # @deps build
+  lint: echo lint
+
+  # @deps test, lint
+  ci: echo ci
+`)
+	cat, err := catalog.LoadFile(filepath.Join(root, "godo.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines, err := catalog.NewEngine(cat, nil).PreviewLines([]string{"ci"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"echo build", "echo test", "echo lint", "echo ci"}
+	if strings.Join(lines, "|") != strings.Join(want, "|") {
+		t.Fatalf("got %v want %v", lines, want)
+	}
+}
+
+func TestEngine_sameDepDifferentCapturesBothRun(t *testing.T) {
+	// Dedup keys on the expanded invocation, not the script, so lint pay and
+	// lint auth are distinct nodes.
+	root := t.TempDir()
+	writeCat(t, root, `version: "0.1"
+dialect: matcher
+scripts:
+  lint ${MODULE}: echo lint ${godo:argv[MODULE]}
+
+  # @deps lint pay, lint auth, lint pay
+  all: echo all
+`)
+	cat, err := catalog.LoadFile(filepath.Join(root, "godo.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines, err := catalog.NewEngine(cat, nil).PreviewLines([]string{"all"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"echo lint pay", "echo lint auth", "echo all"}
+	if strings.Join(lines, "|") != strings.Join(want, "|") {
+		t.Fatalf("got %v want %v", lines, want)
+	}
+}
+
+func TestEngine_argsAreQuotedIntoTheShellLine(t *testing.T) {
+	root := t.TempDir()
+	writeCat(t, root, "version: \"0.1\"\nscripts:\n  greet: echo hello ${godo:args}\n")
+	cat, err := catalog.LoadFile(filepath.Join(root, "godo.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ran []string
+	eng := catalog.NewEngine(cat, runnerFunc(func(c string) error {
+		ran = append(ran, c)
+		return nil
+	}))
+	if err := eng.Run([]string{"greet", "a; touch PWNED"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(ran) != 1 || ran[0] != `echo hello 'a; touch PWNED'` {
+		t.Fatalf("%q", ran)
 	}
 }

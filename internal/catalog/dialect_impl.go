@@ -11,54 +11,47 @@ type PackageDialect struct{}
 // Name implements Dialect.
 func (PackageDialect) Name() DialectName { return DialectPackage }
 
-// Match implements Dialect. Engine selects the script first; this matches by literal key.
-func (PackageDialect) Match(scripts []Script, tokens []string) (*Match, error) {
+// Match implements Dialect: the first token is the literal key, the rest are args.
+func (PackageDialect) Match(script Script, tokens []string) (*Match, error) {
 	if len(tokens) == 0 {
 		return nil, ErrNoTokens
 	}
 	name := tokens[0]
-	args := append([]string(nil), tokens[1:]...)
-	for _, s := range scripts {
-		if s.Key != name {
-			continue
-		}
-		return &Match{
-			Script:   s,
-			Captures: map[string]string{},
-			Args:     args,
-			Dialect:  DialectPackage,
-		}, nil
+	if script.Key != name {
+		return nil, fmt.Errorf("%w: %q", ErrNoMatch, name)
 	}
-	return nil, fmt.Errorf("%w: %q", ErrNoMatch, name)
+	return &Match{
+		Script:   script,
+		Captures: map[string]string{},
+		Args:     append([]string(nil), tokens[1:]...),
+		Dialect:  DialectPackage,
+	}, nil
 }
 
-// MatcherDialect matches Express-style patterns; first match in definition order.
+// MatcherDialect matches Express-style patterns with ${capture} segments.
 type MatcherDialect struct{}
 
 // Name implements Dialect.
 func (MatcherDialect) Name() DialectName { return DialectMatcher }
 
 // Match implements Dialect.
-func (MatcherDialect) Match(scripts []Script, tokens []string) (*Match, error) {
+func (MatcherDialect) Match(script Script, tokens []string) (*Match, error) {
 	if len(tokens) == 0 {
 		return nil, ErrNoTokens
 	}
-	for _, s := range scripts {
-		m, ok, err := matchPattern(s.Key, tokens)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			continue
-		}
-		return &Match{
-			Script:   s,
-			Captures: m.captures,
-			Args:     m.args,
-			Dialect:  DialectMatcher,
-		}, nil
+	m, ok, err := matchPattern(script.Key, tokens)
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("%w: %v", ErrNoMatch, tokens)
+	if !ok {
+		return nil, fmt.Errorf("%w: %v", ErrNoMatch, tokens)
+	}
+	return &Match{
+		Script:   script,
+		Captures: m.captures,
+		Args:     m.args,
+		Dialect:  DialectMatcher,
+	}, nil
 }
 
 type patMatch struct {

@@ -52,7 +52,7 @@ Package keys cannot contain `${capture}`. For patterns, use matcher (file-level 
 scripts:
   test: go test ./...
   # @dialect matcher
-  "run ${GRP} ${SCR}": go run ./scripts/${GRP}/${SCR} ${godo:args}
+  "run ${GRP} ${SCR}": go run ./scripts/${godo:argv[GRP]}/${godo:argv[SCR]} ${godo:args}
 ```
 
 ```bash
