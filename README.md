@@ -13,7 +13,7 @@ godo -e version
 ## Install
 
 ```bash
-brew install MY-RV/tap/godo
+brew install --cask MY-RV/tap/godo
 ```
 
 ```bash
