@@ -20,13 +20,18 @@ const FileName = catalog.FileName
 
 type (
 	DialectName     = catalog.DialectName
+	RunnerName      = catalog.RunnerName
+	RunnerRegistry  = catalog.RunnerRegistry
 	Script          = catalog.Script
 	Catalog         = catalog.Catalog
+	EngineSpec      = catalog.EngineSpec
+	Plugin          = catalog.Plugin
 	Match           = catalog.Match
 	ExitError       = catalog.ExitError
 	Dialect         = catalog.Dialect
 	DialectRegistry = catalog.DialectRegistry
 	Runner          = catalog.Runner
+	ArgsAwareRunner = catalog.ArgsAwareRunner
 	Engine          = catalog.Engine
 	EngineOption    = catalog.EngineOption
 	Plan            = catalog.Plan
@@ -36,6 +41,8 @@ type (
 )
 
 const (
+	RunnerInherit = catalog.RunnerInherit
+
 	DialectPackage = catalog.DialectPackage
 	DialectMatcher = catalog.DialectMatcher
 	DialectNscript = catalog.DialectNscript
@@ -49,6 +56,7 @@ var (
 	ErrDependencyCycle = catalog.ErrDependencyCycle
 	ErrInvalidCatalog  = catalog.ErrInvalidCatalog
 	ErrInvalidCapture  = catalog.ErrInvalidCapture
+	ErrUnknownRunner   = catalog.ErrUnknownRunner
 )
 
 var (
@@ -58,8 +66,12 @@ var (
 	NewDialectRegistry = catalog.NewDialectRegistry
 	DefaultDialects    = catalog.DefaultDialects
 	EffectiveDialect   = catalog.EffectiveDialect
+	NewRunnerRegistry  = catalog.NewRunnerRegistry
+	DefaultRunners     = catalog.DefaultRunners
+	EffectiveRunner    = catalog.EffectiveRunner
 	NewEngine          = catalog.NewEngine
 	WithDialects       = catalog.WithDialects
+	WithRunners        = catalog.WithRunners
 	ExitCode           = catalog.ExitCode
 	IsCaptureName      = catalog.IsCaptureName
 )
