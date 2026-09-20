@@ -141,6 +141,22 @@ scripts:
     ?pnpm install
 ```
 
+## Licensing
+
+A plugin is a separate artifact from a separate repository, and godo does not
+ship one. So godo's own licensing is unaffected by what a plugin contains —
+but the repository that *does* ship one carries whatever is inside it.
+
+A repository distributing a `.wasm` is distributing everything compiled into
+it. Whatever the interpreter or runtime inside it is licensed under, its notice
+travels with the artifact. Check the build's own license inventory rather than
+assuming, and ship the notices next to the `.wasm`, not only in the source
+tree — the artifact is what people download.
+
+godo's own third-party notices are in
+[THIRD_PARTY_LICENSES.md](../../THIRD_PARTY_LICENSES.md) and ship inside the
+release archives.
+
 ## Known limits
 
 - **Local paths only.** `source` is a file on this machine. Fetching belongs

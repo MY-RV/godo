@@ -28,6 +28,13 @@ builds:
 
 archives:
   - id: archive
+    # Default files are LICENSE*/README*/CHANGELOG*. The binaries statically
+    # link Apache-2.0 code (wazero), whose attribution has to ship with them.
+    files:
+      - LICENSE
+      - THIRD_PARTY_LICENSES.md
+      - README.md
+      - CHANGELOG.md
     formats: [tar.gz]
     format_overrides:
       - goos: windows
