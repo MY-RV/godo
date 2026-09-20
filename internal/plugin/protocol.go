@@ -1,0 +1,72 @@
+// Package plugin runs godo plugins as WebAssembly.
+//
+// A plugin is a WASI command: a normal program with a main(), compiled to
+// wasm. godo writes one JSON request to its stdin, the plugin writes JSON ops
+// to its stdout, and godo answers the ones that need answering. The plugin's
+// exit code is the script's exit code.
+//
+// Being a command rather than a set of exported functions is what keeps the
+// contract small. There is no memory-sharing ABI to get right, a plugin can be
+// written in any language that targets WASI, and it can be tested outside wasm
+// entirely — pipe it a request on stdin and read what it says.
+//
+// The sandbox is wazero's default: no filesystem, no network, no environment,
+// no clock beyond what is granted. A plugin reaches the outside world only by
+// asking godo, and godo only honours what the catalog's config grants.
+package plugin
+
+// APIVersion is the protocol this build speaks. A plugin that answers with a
+// different major refuses to run rather than guessing.
+const APIVersion = 1
+
+// Request is the single line godo writes to a plugin's stdin.
+type Request struct {
+	API int `json:"api"`
+	// Mode is "run" or "preview". What preview means is the plugin's call:
+	// it knows what its own bodies do, and godo does not.
+	Mode string `json:"mode"`
+	// Runner is the name the catalog asked for, so one plugin can provide
+	// several.
+	Runner string `json:"runner"`
+	// Body is the script body, verbatim. godo does not expand ${godo:…} for a
+	// plugin: a plugin body is not shell text, and the values are right here.
+	Body string `json:"body"`
+	// Argv holds the matcher's captures; Args the tokens left over.
+	Argv map[string]string `json:"argv"`
+	Args []string          `json:"args"`
+	// Config is the plugin's own block from godo.yaml, verbatim.
+	Config map[string]any `json:"config,omitempty"`
+}
+
+// Op is one line a plugin writes to its stdout.
+type Op struct {
+	Op string `json:"op"`
+
+	// exec
+	Argv    []string `json:"argv,omitempty"`
+	Dir     string   `json:"dir,omitempty"`
+	Capture bool     `json:"capture,omitempty"`
+
+	// emit
+	Line string `json:"line,omitempty"`
+}
+
+// Result is godo's answer to an op that needs one.
+type Result struct {
+	Code   int    `json:"code"`
+	OK     bool   `json:"ok"`
+	Stdout string `json:"stdout,omitempty"`
+	Stderr string `json:"stderr,omitempty"`
+	// Error is set when godo refused: an unknown op, or a capability the
+	// catalog did not grant. It is not a failing command — that is Code.
+	Error string `json:"error,omitempty"`
+}
+
+// Op names.
+const (
+	// OpExec runs an argument vector and waits. Needs config proc.exec.
+	OpExec = "exec"
+	// OpEmit contributes one line to --preview output. Needs nothing, and
+	// gets no answer.
+	OpEmit = "emit"
+)

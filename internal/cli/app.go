@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/my-rv/godo"
 	"github.com/my-rv/godo/internal/catalog"
 	"github.com/my-rv/godo/internal/execshell"
+	"github.com/my-rv/godo/internal/plugin"
 	"github.com/my-rv/godo/internal/update"
 )
 
@@ -92,6 +94,14 @@ func (a *App) Run(args []string) error {
 	runners := catalog.NewRunnerRegistry()
 	if err := runners.Register(catalog.RunnerInherit, execshell.InheritRunner{Dir: root}); err != nil {
 		return err
+	}
+	if len(cat.Engine.Plugins) > 0 {
+		ctx := context.Background()
+		rt := plugin.NewRuntime(ctx)
+		defer rt.Close(ctx)
+		if err := plugin.Register(ctx, rt, cat, runners, root, a.Stdout, a.Stderr, a.Stdin); err != nil {
+			return err
+		}
 	}
 	// Any other name is a shell the catalog asked for by name. godo does not
 	// manage those — it proxies to whatever is on PATH.
@@ -240,9 +250,9 @@ func (a *App) printDeclaredPlugins(cat *catalog.Catalog) {
 	if len(cat.Engine.Plugins) == 0 {
 		return
 	}
-	fmt.Fprintln(a.Stdout, "\ndeclared by this catalog (no plugin loader in this build):")
+	fmt.Fprintln(a.Stdout, "\nfrom plugins declared by this catalog:")
 	for _, p := range cat.Engine.Plugins {
-		fmt.Fprintf(a.Stdout, "  %-10s %s\n", strings.Join(p.Provides, " "), p.Source)
+		fmt.Fprintf(a.Stdout, "  %-16s %s\n", strings.Join(p.Provides, " "), p.Source)
 	}
 }
 

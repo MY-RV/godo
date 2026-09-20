@@ -13,6 +13,35 @@ type Runner interface {
 	Run(command string) error
 }
 
+// Invocation is what a runner needs that a rendered command line cannot carry.
+//
+// A shell runner only ever wanted the finished line. A runner whose bodies are
+// not shell text wants the body as written and the values as data — a plugin
+// script reads a capture by name, it does not read a line godo already pasted
+// it into.
+type Invocation struct {
+	Script   string // the catalog key, for messages
+	Runner   RunnerName
+	Body     string // the body as written
+	Captures map[string]string
+	Args     []string
+}
+
+// InvocationRunner receives the bound invocation instead of a rendered line,
+// and answers for its own --preview.
+//
+// Preview is the runner's to answer because only it knows what its bodies do.
+// godo can render a shell line because it wrote it; it cannot render a program
+// it does not interpret, so it asks.
+//
+// A body reaching one of these is not expanded: ${godo:…} is shell-space
+// syntax, and the values it would paste in are on the Invocation already.
+type InvocationRunner interface {
+	Runner
+	RunInvocation(inv Invocation) error
+	PreviewInvocation(inv Invocation) ([]string, error)
+}
+
 // ArgsAwareRunner is a Runner that decides for itself whether a body takes the
 // tokens left over after the match.
 //
@@ -135,7 +164,7 @@ func (e *Engine) stepRunner(s Script) (RunnerName, error) {
 		// A runner the catalog declared a plugin for is a different failure
 		// from a typo, and saying so saves the reader the hunt.
 		if p, ok := e.Catalog.Engine.ProviderOf("runner", string(name)); ok {
-			return "", fmt.Errorf("%w: script %q asks for runner %q, provided by plugin %s — this build cannot load plugins",
+			return "", fmt.Errorf("%w: script %q asks for runner %q, which plugin %s should provide but did not",
 				ErrUnknownRunner, s.Key, name, p.Source)
 		}
 		// Otherwise the registry's resolver knows why (unknown name, shell not
@@ -155,8 +184,57 @@ type Plan struct {
 type PlanStep struct {
 	Kind    string // "dep" | "body"
 	Source  string
-	Command string
+	Command string     // the line, for runners that take one
 	Runner  RunnerName // effective runner for this step
+	// Inv is set when the step's runner takes the bound invocation instead of
+	// a rendered line.
+	Inv *Invocation
+}
+
+// steps turns one resolved match into plan steps.
+//
+// A runner that takes the bound invocation gets the body as written: ${godo:…}
+// is shell-space syntax, and the values it would paste in travel on the
+// Invocation instead.
+func (e *Engine) steps(kind, source string, m *Match, runner RunnerName) ([]PlanStep, error) {
+	if _, ok := e.invocationRunner(runner); ok {
+		out := make([]PlanStep, 0, len(m.Script.Commands))
+		for _, body := range m.Script.Commands {
+			out = append(out, PlanStep{
+				Kind: kind, Source: source, Command: body, Runner: runner,
+				Inv: &Invocation{
+					Script:   m.Script.Key,
+					Runner:   runner,
+					Body:     body,
+					Captures: m.Captures,
+					Args:     m.Args,
+				},
+			})
+		}
+		return out, nil
+	}
+	cmds, err := expand.ExpandAll(m.Script.Commands, m.Captures, m.Args)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PlanStep, 0, len(cmds))
+	for _, c := range cmds {
+		out = append(out, PlanStep{Kind: kind, Source: source, Command: c, Runner: runner})
+	}
+	return out, nil
+}
+
+// invocationRunner reports whether the runner takes the bound invocation.
+func (e *Engine) invocationRunner(name RunnerName) (InvocationRunner, bool) {
+	if r, err := e.Runners.Lookup(name); err == nil {
+		ir, ok := r.(InvocationRunner)
+		return ir, ok
+	}
+	if name == "" {
+		ir, ok := e.Runner.(InvocationRunner)
+		return ir, ok
+	}
+	return nil, false
 }
 
 // BuildPlan expands deps + body without executing.
@@ -183,13 +261,11 @@ func (e *Engine) BuildPlan(tokens []string) (*Plan, error) {
 	if err := e.appendDeps(plan, m, stack, done); err != nil {
 		return nil, err
 	}
-	cmds, err := expand.ExpandAll(m.Script.Commands, m.Captures, m.Args)
+	steps, err := e.steps("body", m.Script.Key, m, runner)
 	if err != nil {
 		return nil, err
 	}
-	for _, c := range cmds {
-		plan.Steps = append(plan.Steps, PlanStep{Kind: "body", Source: m.Script.Key, Command: c, Runner: runner})
-	}
+	plan.Steps = append(plan.Steps, steps...)
 	return plan, nil
 }
 
@@ -267,13 +343,11 @@ func (e *Engine) appendDeps(plan *Plan, m *Match, stack, done map[string]bool) e
 		if err := e.appendDeps(plan, depMatch, stack, done); err != nil {
 			return err
 		}
-		cmds, err := expand.ExpandAll(depMatch.Script.Commands, depMatch.Captures, depMatch.Args)
+		steps, err := e.steps("dep", invKey, depMatch, depRunner)
 		if err != nil {
 			return err
 		}
-		for _, c := range cmds {
-			plan.Steps = append(plan.Steps, PlanStep{Kind: "dep", Source: invKey, Command: c, Runner: depRunner})
-		}
+		plan.Steps = append(plan.Steps, steps...)
 		delete(stack, invKey)
 		done[invKey] = true
 	}
@@ -291,6 +365,12 @@ func (e *Engine) Run(tokens []string) error {
 		if err != nil {
 			return err
 		}
+		if ir, ok := runner.(InvocationRunner); ok && step.Inv != nil {
+			if err := ir.RunInvocation(*step.Inv); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := runner.Run(step.Command); err != nil {
 			return err
 		}
@@ -298,15 +378,31 @@ func (e *Engine) Run(tokens []string) error {
 	return nil
 }
 
-// PreviewLines returns expanded commands in order (deps + body).
+// PreviewLines returns the lines that would run, in order (deps + body).
+//
+// A runner that takes the bound invocation renders its own: godo can show a
+// shell line because it wrote it, and has to ask for anything else.
 func (e *Engine) PreviewLines(tokens []string) ([]string, error) {
 	plan, err := e.BuildPlan(tokens)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]string, len(plan.Steps))
-	for i, s := range plan.Steps {
-		out[i] = s.Command
+	var out []string
+	for _, s := range plan.Steps {
+		if s.Inv == nil {
+			out = append(out, s.Command)
+			continue
+		}
+		ir, ok := e.invocationRunner(s.Runner)
+		if !ok {
+			out = append(out, s.Command)
+			continue
+		}
+		lines, err := ir.PreviewInvocation(*s.Inv)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, lines...)
 	}
 	return out, nil
 }
