@@ -110,59 +110,12 @@ func TestLoad_refusesSomethingThatIsNotWasm(t *testing.T) {
 	}
 }
 
-func TestInvoke_previewAsksThePlugin(t *testing.T) {
-	p, done := load(t, nil)
-	defer done()
-
-	out, err := p.Invoke(context.Background(), plugin.Request{
-		Mode:   "preview",
-		Runner: "lines",
-		Body:   "git status\n?pnpm install\necho hola ${WHO} $1",
-		Argv:   map[string]string{"WHO": "mundo"},
-		Args:   []string{"un arg"},
-	}, plugin.Host{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Code != 0 {
-		t.Fatalf("code=%d", out.Code)
-	}
-	want := []string{"git status", "pnpm install    # may fail", "echo hola mundo 'un arg'"}
-	if len(out.Emitted) != len(want) {
-		t.Fatalf("emitted=%q", out.Emitted)
-	}
-	for i := range want {
-		if out.Emitted[i] != want[i] {
-			t.Fatalf("emitted=%q want %q", out.Emitted, want)
-		}
-	}
-}
-
-// Preview must not run anything, and with no config granted it could not.
-func TestInvoke_previewGrantsNothing(t *testing.T) {
-	dir := t.TempDir()
-	p, done := load(t, nil)
-	defer done()
-
-	_, err := p.Invoke(context.Background(), plugin.Request{
-		Mode: "preview",
-		Body: "touch marker",
-	}, plugin.Host{Dir: dir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "marker")); err == nil {
-		t.Fatal("preview touched the disk")
-	}
-}
-
 func TestInvoke_execRunsWhenGranted(t *testing.T) {
 	dir := t.TempDir()
 	p, done := load(t, map[string]any{"proc": map[string]any{"exec": true}})
 	defer done()
 
 	out, err := p.Invoke(context.Background(), plugin.Request{
-		Mode: "run",
 		Body: "touch marker\ntouch ${NAME}",
 		Argv: map[string]string{"NAME": "second"},
 	}, plugin.Host{Dir: dir})
@@ -186,7 +139,6 @@ func TestInvoke_execRefusedWhenNotGranted(t *testing.T) {
 	defer done()
 
 	out, err := p.Invoke(context.Background(), plugin.Request{
-		Mode: "run",
 		Body: "touch marker",
 	}, plugin.Host{Dir: dir})
 	if err != nil {
@@ -209,7 +161,7 @@ func TestInvoke_configMustSayTrue(t *testing.T) {
 		{"fs": map[string]any{"exec": true}},
 	} {
 		p, done := load(t, cfg)
-		out, err := p.Invoke(context.Background(), plugin.Request{Mode: "run", Body: "touch marker"}, plugin.Host{Dir: dir})
+		out, err := p.Invoke(context.Background(), plugin.Request{Body: "touch marker"}, plugin.Host{Dir: dir})
 		done()
 		if err != nil {
 			t.Fatalf("%v: %v", cfg, err)
@@ -229,7 +181,6 @@ func TestInvoke_exitCodeIsTheChilds(t *testing.T) {
 	defer done()
 
 	out, err := p.Invoke(context.Background(), plugin.Request{
-		Mode: "run",
 		Body: "sh -c ${SCRIPT}\ntouch should-not-exist",
 		Argv: map[string]string{"SCRIPT": "exit 42"},
 	}, plugin.Host{Dir: t.TempDir()})
@@ -248,7 +199,6 @@ func TestInvoke_optionalLineDoesNotStopTheBody(t *testing.T) {
 	defer done()
 
 	out, err := p.Invoke(context.Background(), plugin.Request{
-		Mode: "run",
 		Body: "?sh -c ${SCRIPT}\ntouch after",
 		Argv: map[string]string{"SCRIPT": "exit 3"},
 	}, plugin.Host{Dir: dir})
@@ -263,17 +213,57 @@ func TestInvoke_optionalLineDoesNotStopTheBody(t *testing.T) {
 	}
 }
 
-// The sandbox is shut: the plugin has no filesystem of its own.
-func TestInvoke_pluginCannotReachTheFilesystemItself(t *testing.T) {
-	p, done := load(t, nil)
+// The sandbox starts shut: with nothing granted the plugin has no filesystem.
+func TestInvoke_noFilesystemUnlessGranted(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "secreto.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, done := load(t, map[string]any{"proc": map[string]any{"exec": true}})
 	defer done()
-	// The example plugin never opens a file, so this asserts the configuration
-	// rather than the plugin: no WithFS was granted, so nothing is mounted.
-	out, err := p.Invoke(context.Background(), plugin.Request{Mode: "preview", Body: "echo hi"}, plugin.Host{})
+
+	// "ls" here runs on the host through exec, which is granted; what is not
+	// granted is the guest seeing the directory itself.
+	out, err := p.Invoke(context.Background(), plugin.Request{Body: "true"}, plugin.Host{Dir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Emitted) != 1 {
-		t.Fatalf("emitted=%q", out.Emitted)
+	if out.Code != 0 {
+		t.Fatalf("code=%d", out.Code)
+	}
+}
+
+// config.fs.mount opens exactly one directory: the catalog's, as the guest root.
+func TestInvoke_mountIsGatedAndScoped(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "presente.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name  string
+		cfg   map[string]any
+		mount bool
+	}{
+		{"sin config", nil, false},
+		{"mount false", map[string]any{"fs": map[string]any{"mount": false}}, false},
+		{"mount true", map[string]any{"fs": map[string]any{"mount": true}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := map[string]any{"proc": map[string]any{"exec": true}}
+			for k, v := range tc.cfg {
+				cfg[k] = v
+			}
+			p, done := load(t, cfg)
+			defer done()
+			// The example plugin does not read files, so this asserts the
+			// wiring: a mount that is not granted is simply not configured.
+			got := p.MountedDir(dir)
+			if tc.mount && got != dir {
+				t.Fatalf("granted mount did not resolve: %q", got)
+			}
+			if !tc.mount && got != "" {
+				t.Fatalf("mount granted without config: %q", got)
+			}
+		})
 	}
 }

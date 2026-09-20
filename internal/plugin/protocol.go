@@ -20,11 +20,13 @@ package plugin
 const APIVersion = 1
 
 // Request is the single line godo writes to a plugin's stdin.
+//
+// There is no mode: a plugin is invoked to run. --preview prints the body
+// without starting anything, so nothing here has to describe a dry run. A
+// later --predict will add a field for it; plugins ignore fields they do not
+// know, so that costs nothing today.
 type Request struct {
 	API int `json:"api"`
-	// Mode is "run" or "preview". What preview means is the plugin's call:
-	// it knows what its own bodies do, and godo does not.
-	Mode string `json:"mode"`
 	// Runner is the name the catalog asked for, so one plugin can provide
 	// several.
 	Runner string `json:"runner"`
@@ -46,9 +48,6 @@ type Op struct {
 	Argv    []string `json:"argv,omitempty"`
 	Dir     string   `json:"dir,omitempty"`
 	Capture bool     `json:"capture,omitempty"`
-
-	// emit
-	Line string `json:"line,omitempty"`
 }
 
 // Result is godo's answer to an op that needs one.
@@ -66,7 +65,4 @@ type Result struct {
 const (
 	// OpExec runs an argument vector and waits. Needs config proc.exec.
 	OpExec = "exec"
-	// OpEmit contributes one line to --preview output. Needs nothing, and
-	// gets no answer.
-	OpEmit = "emit"
 )

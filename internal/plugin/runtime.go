@@ -11,6 +11,8 @@ import (
 	"sync"
 
 	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/api"
+	"github.com/tetratelabs/wazero/experimental"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 )
 
@@ -21,8 +23,14 @@ type Runtime struct {
 }
 
 // NewRuntime returns a runtime with WASI available and nothing else.
+//
+// Exception handling is enabled because a C interpreter compiled for WASI uses
+// it for setjmp/longjmp — MicroPython's non-local return is built on it, and
+// without the feature its module does not even compile ("tag section not
+// supported"). It costs nothing for a plugin that does not use it.
 func NewRuntime(ctx context.Context) *Runtime {
-	rt := wazero.NewRuntime(ctx)
+	rt := wazero.NewRuntimeWithConfig(ctx, wazero.NewRuntimeConfig().
+		WithCoreFeatures(api.CoreFeaturesV2|experimental.CoreFeaturesExceptionHandling))
 	wasi_snapshot_preview1.MustInstantiate(ctx, rt)
 	return &Runtime{rt: rt}
 }

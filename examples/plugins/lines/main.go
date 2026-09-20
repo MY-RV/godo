@@ -12,6 +12,9 @@
 // starting with "?" may fail without stopping the rest. ${NAME} is replaced
 // with a capture; $1, $2, … with a leftover argument.
 //
+// There is no preview branch: godo prints the body itself and never starts a
+// plugin for --preview.
+//
 // Build:
 //
 //	GOOS=wasip1 GOARCH=wasm go build -o lines.wasm ./examples/plugins/lines
@@ -32,7 +35,6 @@ import (
 // request is godo's opening line. Only the fields this plugin uses.
 type request struct {
 	API    int               `json:"api"`
-	Mode   string            `json:"mode"`
 	Runner string            `json:"runner"`
 	Body   string            `json:"body"`
 	Argv   map[string]string `json:"argv"`
@@ -43,7 +45,6 @@ type op struct {
 	Op      string   `json:"op"`
 	Argv    []string `json:"argv,omitempty"`
 	Capture bool     `json:"capture,omitempty"`
-	Line    string   `json:"line,omitempty"`
 }
 
 type result struct {
@@ -80,14 +81,6 @@ func main() {
 			fail(fmt.Errorf("line %d: %w", n+1, err))
 		}
 		if len(argv) == 0 {
-			continue
-		}
-
-		// Preview is the plugin's business: godo does not know what a body of
-		// this shape would do, so it asks, and this answers by describing the
-		// commands rather than running them.
-		if req.Mode == "preview" {
-			emit(out, previewLine(argv, mayFail))
 			continue
 		}
 
@@ -180,22 +173,6 @@ func expandWord(word string, req request) (string, error) {
 	return b.String(), nil
 }
 
-func previewLine(argv []string, mayFail bool) string {
-	quoted := make([]string, len(argv))
-	for i, a := range argv {
-		if strings.ContainsAny(a, " \t'\"") {
-			quoted[i] = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
-		} else {
-			quoted[i] = a
-		}
-	}
-	line := strings.Join(quoted, " ")
-	if mayFail {
-		line += "    # may fail"
-	}
-	return line
-}
-
 func exec(in *bufio.Scanner, out *json.Encoder, argv []string) (result, error) {
 	if err := out.Encode(op{Op: "exec", Argv: argv}); err != nil {
 		return result{}, err
@@ -211,12 +188,6 @@ func exec(in *bufio.Scanner, out *json.Encoder, argv []string) (result, error) {
 		return result{}, fmt.Errorf("unreadable result: %w", err)
 	}
 	return res, nil
-}
-
-func emit(out *json.Encoder, line string) {
-	if err := out.Encode(op{Op: "emit", Line: line}); err != nil {
-		fail(err)
-	}
 }
 
 func fail(err error) {

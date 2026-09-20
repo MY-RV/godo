@@ -233,6 +233,16 @@ Copyright 2020-2023 wazero authors
 
 ---
 
+## golang.org/x/sys
+
+Low-level OS primitives. Pulled in by wazero.
+
+Licensed under the BSD 3-Clause License, `Copyright (c) 2009 The Go Authors`.
+Same terms as the Go standard library, whose runtime is already part of every
+Go binary.
+
+---
+
 ## gopkg.in/yaml.v3
 
 YAML parser. Used to read `godo.yaml`.

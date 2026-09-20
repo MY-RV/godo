@@ -14,6 +14,8 @@ godo → plugin stdin    one JSON result per op that needs one
 plugin exits           its exit code is the script's
 ```
 
+`--preview` never starts a plugin. It prints the body.
+
 Being a command rather than a set of exported functions keeps the contract
 small: there is no memory-sharing ABI to get right, any language that targets
 WASI can write one, and a plugin can be tested as an ordinary program —
@@ -24,9 +26,28 @@ echo '{"api":1,"mode":"preview","body":"echo hi","argv":{},"args":[]}' | ./plugi
 
 ## The sandbox
 
-wazero's default, which is nothing: no filesystem, no network, no environment,
-no clock. A plugin reaches the outside world only by asking godo, and godo only
-honours what `engine.plugins[].config` grants.
+It starts shut, and nothing here disables anything — nothing is granted. With
+an empty `config`, measured from inside a plugin:
+
+```
+os.listdir(".")     OSError [Errno 44] ENOENT
+open("/etc/passwd") OSError [Errno 44] ENOENT
+os.getenv("HOME")   None
+time.time()         1640995200.0      (frozen)
+import socket       the module is not there
+```
+
+`engine.plugins[].config` adds back exactly what it names, and nothing else.
+
+| Grant | Gives |
+|-------|-------|
+| `proc.exec` | the `exec` op |
+| `fs.mount` | the catalog's own directory, as the guest's root |
+| `time.wall` | the real clock instead of a frozen one |
+
+`fs.mount` is a bool, not a path: what gets mounted is the directory the
+`godo.yaml` lives in, never somewhere the file names. A catalog that chose its
+own mount point could ask for `/`, and the grant would mean nothing.
 
 ## Request
 
@@ -35,7 +56,6 @@ One line, written once, before anything else.
 ```json
 {
   "api": 1,
-  "mode": "run",
   "runner": "lines",
   "body": "git status\n?pnpm install",
   "argv": {"BRANCH": "wt/example"},
@@ -47,7 +67,6 @@ One line, written once, before anything else.
 | Field | |
 |-------|--|
 | `api` | Protocol version. A plugin that speaks another major should exit non-zero rather than guess |
-| `mode` | `"run"` or `"preview"` |
 | `runner` | The name the catalog asked for, so one plugin can provide several |
 | `body` | The script body, **verbatim**. `${godo:…}` is not expanded — that is shell-space syntax, and the values are on this request already |
 | `argv` | The matcher's captures |
@@ -62,14 +81,10 @@ unbuffered, so a plugin that spoke first would deadlock.
 | Op | Answered | Needs |
 |----|----------|-------|
 | `exec` | yes | `config.proc.exec` |
-| `emit` | **no** | nothing |
 
 ```json
 {"op":"exec","argv":["git","status"],"dir":"","capture":false}
-{"op":"emit","line":"git status"}
 ```
-
-`emit` is one-way on purpose: a plugin that waited for an answer would hang.
 
 ### Result
 
@@ -101,14 +116,14 @@ reads only what it gates on.
 
 ## Preview
 
-The plugin's to answer. godo can render a shell line because it wrote it; it
-cannot render a program it does not interpret, so it asks with `mode:
-"preview"` and prints whatever `emit` lines come back.
+`godo --preview` prints the body and **does not start the plugin**. Nothing is
+compiled, nothing is instantiated, no grant is needed.
 
-Which means a plugin **can** run things during a preview, because it is the one
-holding the capability. A plugin that does is misbehaving, the same way a
-`--dry-run` that writes is misbehaving. Grant `proc.exec` to plugins you trust
-to tell the difference.
+A plugin body is a program. The only faithful answer to "what will this do"
+without running it is the program itself; anything else is a guess. A guess is
+useful, but it deserves its own flag rather than quietly borrowing this one —
+that is a later `--predict`, which will add back a mode field and an output op.
+Plugins ignore fields they do not know, so nothing written today breaks then.
 
 ## Exit codes
 
@@ -164,5 +179,5 @@ release archives.
 - **Size.** A Go plugin carries Go's runtime — the example is ~4.5 MB. TinyGo
   or a C-family language produces far smaller wasm.
 - **One instantiation per step.** Fine at godo's scale; it is not a server.
-- **`exec` only.** No spawn, no filesystem ops. Those are the next capabilities
-  and the reason `config` is shaped as sections.
+- **`exec` only.** No spawn. Filesystem access is the mount, not an op.
+  `config` is shaped as sections so more can be added without moving anything.

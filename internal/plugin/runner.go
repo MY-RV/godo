@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/my-rv/godo/internal/catalog"
 )
@@ -35,7 +36,12 @@ func (Runner) AcceptsArgs([]string) bool { return true }
 
 // RunInvocation implements catalog.InvocationRunner.
 func (r Runner) RunInvocation(inv catalog.Invocation) error {
-	out, err := r.invoke(inv, "run")
+	out, err := r.Plugin.Invoke(context.Background(), Request{
+		Runner: string(r.Name),
+		Body:   inv.Body,
+		Argv:   nonNil(inv.Captures),
+		Args:   inv.Args,
+	}, r.Host)
 	if err != nil {
 		return err
 	}
@@ -48,33 +54,14 @@ func (r Runner) RunInvocation(inv catalog.Invocation) error {
 	return nil
 }
 
-// PreviewInvocation implements catalog.InvocationRunner.
+// PreviewInvocation implements catalog.InvocationRunner: the body, verbatim.
 //
-// The plugin decides what preview means for its own bodies. A plugin that
-// emits nothing previews as nothing, and one that refuses to preview says so
-// by exiting non-zero.
+// --preview does not start the plugin. A plugin body is a program, and the
+// only faithful answer to "what will this do" without running it is the
+// program itself. Anything else would be a guess dressed as a fact, and a
+// guess needs its own flag rather than quietly borrowing this one.
 func (r Runner) PreviewInvocation(inv catalog.Invocation) ([]string, error) {
-	out, err := r.invoke(inv, "preview")
-	if err != nil {
-		return nil, err
-	}
-	if out.Code != 0 {
-		return nil, &catalog.ExitError{
-			Code:    out.Code,
-			Message: fmt.Sprintf("script %q: runner %q could not preview it", inv.Script, r.Name),
-		}
-	}
-	return out.Emitted, nil
-}
-
-func (r Runner) invoke(inv catalog.Invocation, mode string) (Outcome, error) {
-	return r.Plugin.Invoke(context.Background(), Request{
-		Mode:   mode,
-		Runner: string(r.Name),
-		Body:   inv.Body,
-		Argv:   nonNil(inv.Captures),
-		Args:   inv.Args,
-	}, r.Host)
+	return strings.Split(strings.TrimRight(inv.Body, "\n"), "\n"), nil
 }
 
 func nonNil(m map[string]string) map[string]string {

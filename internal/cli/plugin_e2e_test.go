@@ -87,20 +87,35 @@ func TestE2E_pluginRunnerRunsTheScript(t *testing.T) {
 	}
 }
 
-// Preview is the plugin's to answer: godo cannot render a body it does not
-// interpret, so it asks and prints what comes back.
-func TestE2E_pluginRendersItsOwnPreview(t *testing.T) {
+// --preview prints the body and never starts the plugin.
+//
+// A plugin body is a program; the only faithful answer to "what will this do"
+// without running it is the program itself. Guessing the flow is a separate
+// flag's job, not this one's.
+func TestE2E_previewPrintsTheBodyAndStartsNothing(t *testing.T) {
 	cwd := pluginCatalog(t, true, "  # @runner lines\n  boot: |\n    touch one\n    ?false\n")
 	app, out, _ := e2eApp(t, cwd)
 	if err := app.Run([]string{"--preview", "boot"}); err != nil {
 		t.Fatal(err)
 	}
 	got := strings.TrimSpace(out.String())
-	if got != "touch one\nfalse    # may fail" {
+	if got != "touch one\n?false" {
 		t.Fatalf("preview=%q", got)
 	}
 	if _, err := os.Stat(filepath.Join(cwd, "one")); err == nil {
 		t.Fatal("preview ran the body")
+	}
+}
+
+// Preview works with nothing granted at all: it never reaches the sandbox.
+func TestE2E_previewNeedsNoGrants(t *testing.T) {
+	cwd := pluginCatalog(t, false, "  # @runner lines\n  boot: |\n    touch one\n")
+	app, out, _ := e2eApp(t, cwd)
+	if err := app.Run([]string{"--preview", "boot"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out.String()) != "touch one" {
+		t.Fatalf("preview=%q", out.String())
 	}
 }
 

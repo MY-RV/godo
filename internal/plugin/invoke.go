@@ -30,8 +30,6 @@ type Host struct {
 type Outcome struct {
 	// Code is the plugin's exit code, and so the script's.
 	Code int
-	// Emitted holds the lines the plugin contributed to --preview.
-	Emitted []string
 }
 
 // Invoke runs the plugin once.
@@ -51,13 +49,23 @@ func (p *Plugin) Invoke(ctx context.Context, req Request, host Host) (Outcome, e
 		stderr = os.Stderr
 	}
 
+	// The sandbox starts shut: no filesystem, no environment, no network, and
+	// a frozen clock. Nothing is disabled here — nothing is granted. What the
+	// catalog's config asks for is added back below, and only that.
 	cfg := wazero.NewModuleConfig().
 		WithStdin(inR).
 		WithStdout(outW).
 		WithStderr(stderr).
 		WithArgs("plugin").
-		// No WithFS, no WithEnv, no WithSysWalltime: the sandbox stays shut.
 		WithName("")
+	if dir := p.mountDir(host.Dir); dir != "" {
+		// Scoped to one directory, which becomes the guest's root. A script
+		// can reach the catalog it belongs to and nothing above it.
+		cfg = cfg.WithFSConfig(wazero.NewFSConfig().WithDirMount(dir, "/"))
+	}
+	if p.granted("time", "wall") {
+		cfg = cfg.WithSysWalltime().WithSysNanotime()
+	}
 
 	runErr := make(chan error, 1)
 	go func() {
@@ -80,7 +88,7 @@ func (p *Plugin) Invoke(ctx context.Context, req Request, host Host) (Outcome, e
 	}()
 
 	out := Outcome{}
-	loopErr := p.serve(outR, inW, host, &out)
+	loopErr := p.serve(outR, inW, host)
 
 	_ = inW.Close()
 	_ = inR.Close()
@@ -107,7 +115,7 @@ func (p *Plugin) Invoke(ctx context.Context, req Request, host Host) (Outcome, e
 }
 
 // serve answers ops until the plugin's stdout closes.
-func (p *Plugin) serve(r io.Reader, w io.Writer, host Host, out *Outcome) error {
+func (p *Plugin) serve(r io.Reader, w io.Writer, host Host) error {
 	scan := bufio.NewScanner(r)
 	scan.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	enc := json.NewEncoder(w)
@@ -122,10 +130,6 @@ func (p *Plugin) serve(r io.Reader, w io.Writer, host Host, out *Outcome) error 
 			return fmt.Errorf("plugin %s: unreadable op %q: %w", p.Source, line, err)
 		}
 		switch op.Op {
-		case OpEmit:
-			// Preview output. No answer: a plugin that waited for one here
-			// would hang, so emit is deliberately one-way.
-			out.Emitted = append(out.Emitted, op.Line)
 		case OpExec:
 			res := p.execOp(op, host)
 			if err := enc.Encode(res); err != nil {
@@ -194,6 +198,23 @@ func orStd(w io.Writer, def io.Writer) io.Writer {
 		return def
 	}
 	return w
+}
+
+// mountDir returns the directory to mount, or "" for no filesystem.
+//
+// config.fs.mount is a bool rather than a path: what gets mounted is the
+// catalog's own directory, never somewhere the catalog names. A file that
+// picks its own mount point could ask for "/" and the grant would mean
+// nothing.
+func (p *Plugin) mountDir(catalogDir string) string { return p.MountedDir(catalogDir) }
+
+// MountedDir reports which directory this plugin would be given, or "" for
+// none. Exported so a caller can show the grant without invoking anything.
+func (p *Plugin) MountedDir(catalogDir string) string {
+	if catalogDir == "" || !p.granted("fs", "mount") {
+		return ""
+	}
+	return catalogDir
 }
 
 // granted reports whether config grants section.key.
