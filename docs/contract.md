@@ -94,6 +94,10 @@ no escape syntax.
 Expanded values are **shell-quoted** for the host shell (`sh` / `cmd`): one
 argument in is one argument out. `:raw` opts a single placeholder out.
 
+A value shaped like `--flag=…` is quoted from the `=` onward, so a preview
+reads `--am='two words'` rather than `'--am=two words'`. Same single argument
+to the shell; the flag name is not part of the value.
+
 Windows caveat: `cmd.exe` expands `%VAR%` and `!VAR!` before a command sees its
 arguments, and no quoting on the command line fully suppresses that.
 

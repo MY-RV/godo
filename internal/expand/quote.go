@@ -1,6 +1,7 @@
 package expand
 
 import (
+	"regexp"
 	"runtime"
 	"strings"
 )
@@ -15,10 +16,40 @@ import (
 // that. Values containing % or ! are quoted defensively, but a catalog that
 // must handle them exactly on Windows should not rely on cmd.
 func Quote(s string) string {
+	if prefix, rest, ok := splitFlagAssignment(s); ok {
+		return prefix + quoteForHost(rest)
+	}
+	return quoteForHost(s)
+}
+
+func quoteForHost(s string) string {
 	if runtime.GOOS == "windows" {
 		return quoteWindows(s)
 	}
 	return quotePOSIX(s)
+}
+
+// reFlagAssignment matches "--flag=" and "-f=" at the start of a value.
+var reFlagAssignment = regexp.MustCompile(`^(--?[A-Za-z0-9][A-Za-z0-9_.-]*=)(.*)$`)
+
+// splitFlagAssignment separates a leading "--flag=" from the value behind it.
+//
+// A shell hands godo one argument, so "--am=two words" arrives whole and would
+// otherwise be quoted whole: git commit '--am=two words'. That reads as though
+// the flag name were part of the message. Quoting only the value —
+// --am='two words' — is the same single argument to the shell, and is what a
+// person would have typed. Preview is the feature; it should look like the
+// command it is.
+func splitFlagAssignment(s string) (prefix, rest string, ok bool) {
+	m := reFlagAssignment.FindStringSubmatch(s)
+	if m == nil {
+		return "", "", false
+	}
+	// The prefix goes in unquoted, so it has to be inert on its own.
+	if !shellSafePOSIX(m[1]) || (runtime.GOOS == "windows" && !shellSafeWindows(m[1])) {
+		return "", "", false
+	}
+	return m[1], m[2], true
 }
 
 // shellSafePOSIX reports whether s can be interpolated bare into an sh line.

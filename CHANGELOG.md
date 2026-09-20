@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+- A value shaped like `--flag=…` is quoted from the `=` onward, so `--preview`
+  shows `git commit --am='two words'` instead of `git commit '--am=two words'`,
+  which read as though the flag name were part of the message. Identical single
+  argument to the shell — rendering only.
+
 ## [0.2.0] — 2026-09-19
 
 Breaking. Placeholder syntax inside script bodies changed; catalogs need editing.
