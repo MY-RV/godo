@@ -13,7 +13,8 @@ Because a body is shell text, godo claims **only** the `${godo:…}` namespace t
 and leaves every other `${…}` alone. A collision is not resolved — it cannot occur.
 
 ```yaml
-dialect: matcher
+engine:
+  dialect: matcher
 
 scripts:
   # @deps lint ${MODULE}                        # godo space
@@ -27,7 +28,8 @@ scripts:
 Consumes a capture bound by the matcher key.
 
 ```yaml
-dialect: matcher
+engine:
+  dialect: matcher
 
 scripts:
   build ${name}: echo building ${godo:argv[name]} -- ${godo:args}

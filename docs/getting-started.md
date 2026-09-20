@@ -31,7 +31,7 @@ scripts:
   check: go build -o app .
 ```
 
-`version` is required. `dialect` is optional and defaults to `package`. Script docs and `@deps` / `@dialect` are comments immediately above each key — start with [guide/scripts.md](./guide/scripts.md).
+`version` is required. `engine.dialect` is optional and defaults to `package`. Script docs and `@deps` / `@dialect` are comments immediately above each key — start with [guide/scripts.md](./guide/scripts.md).
 
 ## 3. Run
 
