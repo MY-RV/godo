@@ -42,6 +42,7 @@ func Parse(data []byte, path string, dialects ...*DialectRegistry) (*Catalog, er
 	}
 
 	cat := &Catalog{Path: path}
+	var legacyDialect DialectName
 	var scriptsNode *yaml.Node
 	for i := 0; i < len(doc.Content); i += 2 {
 		key := doc.Content[i]
@@ -50,7 +51,13 @@ func Parse(data []byte, path string, dialects ...*DialectRegistry) (*Catalog, er
 		case "version":
 			cat.Version = strings.TrimSpace(scalarString(val))
 		case "dialect":
-			cat.Dialect = DialectName(strings.TrimSpace(scalarString(val)))
+			// Legacy position, kept because it shipped in 0.1 and 0.2.
+			// engine.dialect is the current one and wins.
+			legacyDialect = DialectName(strings.TrimSpace(scalarString(val)))
+		case "engine":
+			if err := val.Decode(&cat.Engine); err != nil {
+				return nil, fmt.Errorf("%w: engine: %v", ErrInvalidCatalog, err)
+			}
 		case "scripts":
 			scriptsNode = val
 		}
@@ -58,9 +65,26 @@ func Parse(data []byte, path string, dialects ...*DialectRegistry) (*Catalog, er
 	if cat.Version == "" {
 		return nil, fmt.Errorf("%w: version is required", ErrInvalidCatalog)
 	}
+	if err := validateEngine(cat.Engine); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidCatalog, err)
+	}
+	cat.Dialect = cat.Engine.Dialect
+	if cat.Dialect == "" {
+		cat.Dialect = legacyDialect
+	}
+	cat.Runner = cat.Engine.Runner
 	if cat.Dialect == "" {
 		cat.Dialect = DialectPackage
 	}
+	// An unset runner stays unset: it means "whatever this engine runs with",
+	// which is the Runner injected into it. Naming a default here would bake a
+	// choice that belongs to the caller — godo the CLI runs your own shell,
+	// while an embedder runs what it wired up.
+	//
+	// Runner names are not validated here either. A dialect has to resolve
+	// before a script can be matched at all, so an unknown one is a load error;
+	// a runner is only needed to execute, and the registry that could answer
+	// for it belongs to the Engine. An unknown runner fails at plan time.
 	if _, err := reg.Lookup(cat.Dialect); err != nil {
 		return nil, fmt.Errorf("%w: dialect %q not implemented", ErrInvalidCatalog, cat.Dialect)
 	}
@@ -90,13 +114,14 @@ func Parse(data []byte, path string, dialects ...*DialectRegistry) (*Catalog, er
 
 func scriptFromNodes(key, val *yaml.Node, fileDialect DialectName, reg *DialectRegistry) (Script, error) {
 	s := Script{Key: key.Value}
-	doc, deps, dialect, err := parseDecorators(key.HeadComment)
+	dec, err := parseDecorators(key.HeadComment)
 	if err != nil {
 		return Script{}, fmt.Errorf("%w: script %q: %v", ErrInvalidCatalog, s.Key, err)
 	}
-	s.Doc = doc
-	s.Deps = deps
-	s.Dialect = dialect
+	s.Doc = dec.doc
+	s.Deps = dec.deps
+	s.Dialect = dec.dialect
+	s.Runner = dec.runner
 	if s.Dialect != "" {
 		if _, err := reg.Lookup(DialectName(s.Dialect)); err != nil {
 			return Script{}, fmt.Errorf("%w: script %q: @dialect %q not implemented", ErrInvalidCatalog, s.Key, s.Dialect)
@@ -153,9 +178,18 @@ func validateMatcherKey(key string) error {
 	return nil
 }
 
-func parseDecorators(headComment string) (doc string, deps []string, dialect string, err error) {
+// decorators is the parsed @-block above a script key.
+type decorators struct {
+	doc     string
+	deps    []string
+	dialect string
+	runner  string
+}
+
+func parseDecorators(headComment string) (decorators, error) {
+	var dec decorators
 	if headComment == "" {
-		return "", nil, "", nil
+		return dec, nil
 	}
 	var docLines []string
 	for _, line := range strings.Split(headComment, "\n") {
@@ -173,20 +207,26 @@ func parseDecorators(headComment string) (doc string, deps []string, dialect str
 			switch fields[0] {
 			case "@deps", "@dependencies":
 				rest := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
-				deps = append(deps, splitDepsList(rest)...)
+				dec.deps = append(dec.deps, splitDepsList(rest)...)
 			case "@dialect":
 				if len(fields) < 2 || fields[1] == "" {
-					return "", nil, "", fmt.Errorf("@dialect requires a name")
+					return decorators{}, fmt.Errorf("@dialect requires a name")
 				}
-				dialect = fields[1]
+				dec.dialect = fields[1]
+			case "@runner":
+				if len(fields) < 2 || fields[1] == "" {
+					return decorators{}, fmt.Errorf("@runner requires a name")
+				}
+				dec.runner = fields[1]
 			default:
-				return "", nil, "", fmt.Errorf("unknown decorator %s", fields[0])
+				return decorators{}, fmt.Errorf("unknown decorator %s", fields[0])
 			}
 			continue
 		}
 		docLines = append(docLines, line)
 	}
-	return strings.Join(docLines, "\n"), deps, dialect, nil
+	dec.doc = strings.Join(docLines, "\n")
+	return dec, nil
 }
 
 func splitDepsList(s string) []string {
