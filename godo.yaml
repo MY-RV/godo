@@ -1,5 +1,10 @@
 version: "0.1"
 
+# No runner: named, so every script below runs under the shell you are in.
+# These are plain commands, so that is the same everywhere — see
+# docs/guide/runners.md. A script needing one specific shell says so with
+# "# @runner <shell>".
+
 scripts:
   test: go test ./...
   vet: go vet ./...

@@ -6,7 +6,8 @@ Keys are token patterns. First matching key (definition order) wins.
 
 ```yaml
 version: "0.1"
-dialect: matcher
+engine:
+  dialect: matcher
 
 scripts:
   test ${MODULE}: go test ./${godo:argv[MODULE]}/...

@@ -18,6 +18,7 @@ Normative source: [contract.md](../contract.md).
 
 | | |
 |--|--|
+| `-e runners` | List runners usable on this machine |
 | `-e version` | Print binary version |
 | `-e update` | Install newer Release asset |
 | `-e update check` | Check only |
