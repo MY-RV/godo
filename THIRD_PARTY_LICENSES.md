@@ -5,6 +5,11 @@ statically link the libraries below, so their notices travel with them.
 
 Source dependencies are listed in [go.mod](./go.mod).
 
+Every licence here is permissive. None of them asks GoDo to change its own, and
+none of them reaches into a plugin: a plugin is a separate artifact from a
+separate repository, and GoDo does not ship one. What a plugin contains is
+that repository's inventory to publish, next to its own artifact.
+
 ---
 
 ## github.com/tetratelabs/wazero
