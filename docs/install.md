@@ -37,8 +37,12 @@ go build -ldflags "-X github.com/my-rv/godo.Version=v0.2.0" -o godo ./cmd/godo
 ## Package managers
 
 ```bash
-brew install MY-RV/tap/godo
+brew install --cask MY-RV/tap/godo
 ```
+
+Homebrew ships pre-built binaries as a **cask**, and casks are macOS-only. On Linux use Go or the release binary.
+
+If you previously installed the Formula (`brew install MY-RV/tap/godo`), uninstall it first: `brew uninstall godo`, then install the cask.
 
 ```powershell
 scoop bucket add my-rv https://github.com/MY-RV/scoop-bucket

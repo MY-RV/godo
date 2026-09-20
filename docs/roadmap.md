@@ -18,7 +18,7 @@ This is what we **commit to communicate**. Pre-1.0 APIs can still change within 
 
 ## Post-v0.1 — intended (not promised dates)
 
-- Shared family packaging: `MY-RV/homebrew-tap` (`brew install MY-RV/tap/godo`), `MY-RV/scoop-bucket`
+- Shared family packaging: `MY-RV/homebrew-tap` (`brew install --cask MY-RV/tap/godo`), `MY-RV/scoop-bucket`
 - Optional: winget (`MY-RV.Godo`), later choco / AUR / Nix as demand appears
 - Engine command registry polish; more e2e
 - Dialects backlog only if explicitly promoted here
