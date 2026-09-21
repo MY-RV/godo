@@ -41,10 +41,10 @@ A preview is published as a GitHub **pre-release**. `godo -e update` reads the
 arrives on its own — you go and get it:
 
 ```bash
-go install github.com/my-rv/godo/cmd/godo@v0.3.0-preview.1
+go install github.com/my-rv/godo/cmd/godo@v0.3.0-preview.2
 ```
 
-or download the `v0.3.0-preview.1` assets from
+or download the `v0.3.0-preview.2` assets from
 [Releases](https://github.com/MY-RV/godo/releases).
 
 On a preview binary `godo -e update check` reports no update available: the

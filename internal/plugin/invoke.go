@@ -320,8 +320,9 @@ func (p *Plugin) slinkOp(op Op, host Host) Result {
 		return Result{Error: fmt.Sprintf("slink: dst: %v", err)}
 	}
 
-	// Windows support for os.Symlink is unverified on a real Windows host.
-	if err := os.Symlink(src, dst); err != nil {
+	// The mechanism is the platform's: a symlink on Unix, a junction or a hard
+	// link on Windows. See linkPath.
+	if err := linkPath(src, dst); err != nil {
 		return Result{Error: fmt.Sprintf("slink: %v", err)}
 	}
 	return Result{Code: 0, OK: true}

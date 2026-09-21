@@ -165,7 +165,10 @@ func TestE2E_engineRunnersLists(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, want := range []string{"inherit", "[default]", "shells found here", "GODO_SHELL", "Not the shell you expected"} {
+	// The listing says which shell, and how it was chosen: a wrong shell is
+	// only diagnosable if the reader can tell a stale GODO_SHELL from a
+	// fallback.
+	for _, want := range []string{"inherit", "the default runner", "shells found here", "GODO_SHELL", "Not the shell you expected"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in:\n%s", want, got)
 		}

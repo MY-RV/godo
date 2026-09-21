@@ -87,22 +87,33 @@ func (r InheritRunner) Run(command string) error {
 // now: bash started inside zsh still reports zsh. That is the convention every
 // other tool follows, and GODO_SHELL is the way to disagree with it too.
 func DetectShell() string {
+	shell, _ := DetectedShell()
+	return shell
+}
+
+// DetectedShell is DetectShell with the reason it landed there.
+//
+// The reason is not decoration. When the detected shell is wrong, the useful
+// question is which rule answered — a stale GODO_SHELL reads nothing like a
+// fallback to %ComSpec% because no shell was found — and a reader cannot tell
+// those apart from a path alone.
+func DetectedShell() (shell, why string) {
 	if s := strings.TrimSpace(os.Getenv("GODO_SHELL")); s != "" {
-		return s
+		return s, "set by GODO_SHELL"
 	}
 	if runtime.GOOS == "windows" {
 		if s := callerShell(); s != "" {
-			return s
+			return s, "found in the process tree"
 		}
 		if c := strings.TrimSpace(os.Getenv("ComSpec")); c != "" {
-			return c
+			return c, "%ComSpec%, because no shell is in the process tree"
 		}
-		return "cmd.exe"
+		return "cmd.exe", "the last resort; no shell in the process tree, no %ComSpec%"
 	}
 	if s := strings.TrimSpace(os.Getenv("SHELL")); s != "" {
-		return s
+		return s, "your $SHELL"
 	}
-	return "/bin/sh"
+	return "/bin/sh", "the last resort; $SHELL is unset"
 }
 
 // shellBase is the shell's name, lowercased and without a .exe suffix.

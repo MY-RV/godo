@@ -2,6 +2,55 @@
 
 ## [Unreleased]
 
+## [0.3.0-preview.2] — 2026-09-21
+
+**A preview**, on the same terms as the one before it: a GitHub pre-release, so
+`godo -e update` does not offer it and neither Homebrew nor Scoop carries it.
+
+All of it was found by running `v0.3.0-preview.1` on a real Windows host, which
+is what the preview was for. The roadmap said Windows shell detection was
+written from documentation and unverified; it was also wrong, and so were two
+other things.
+
+Still unverified, and the reason this is preview.2 rather than 0.3.0: the
+junction syscall runs only on Windows. Its reparse buffer is built in portable
+code and tested field by field, but `DeviceIoControl` itself has been executed
+by nobody.
+
+### Fixed
+- **Every PowerShell user on Windows was told they were in `cmd`.** Detection
+  read the parent process, and something is usually in between: scoop installs
+  godo as `shims\godo.exe`, which starts the real `godo.exe` as a child, so the
+  parent of the process asking the question was *godo*. Not a shell, so the
+  answer fell through to `%ComSpec%`. It now walks up the process tree to the
+  nearest shell, which also covers npm, bun and make wrappers and an editor's
+  terminal.
+- **A catalog written on Windows lost its decorators.** With CRLF the YAML
+  parser files the comment above a key as the *previous* key's foot comment, so
+  `# @dialect matcher` decorated nothing — unless a blank line happened to sit
+  above it, which is why it read as "no space between the command and the
+  comment breaks it". Line endings are normalized before parsing, which YAML
+  already calls the same line break. It also keeps a `\r` out of a block
+  scalar, where it was being handed to the shell as part of the command.
+- **`fs.slink` did nothing on Windows.** It called `os.Symlink`, and a symlink
+  there is a privilege rather than a file operation, so an ordinary user got
+  "A required privilege is not held by the client". It now uses the link
+  Windows actually offers — a **junction** for a directory, a **hard link** for
+  a file — neither of which needs a privilege. The op is the same op; the
+  mechanism is the platform's.
+
+### Added
+- A decorator YAML puts somewhere godo does not read is now an error naming
+  where it belongs, instead of being dropped: `ins: x  # @deps y` files the
+  comment on the value, and a decorator after the last key files as that key's
+  foot comment. Prose that merely mentions `@deps` is still a comment.
+
+### Changed
+- `godo -e runners` says **how** the default shell was chosen — `your $SHELL`,
+  `found in the process tree`, `set by GODO_SHELL`, `%ComSpec%, because no
+  shell is in the process tree`. A wrong answer is only diagnosable if you can
+  tell a stale `GODO_SHELL` from a fallback, and a path alone cannot.
+
 ## [0.3.0-preview.1] — 2026-09-20
 
 **A preview.** It is a GitHub pre-release, so `godo -e update` does not offer

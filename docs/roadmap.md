@@ -16,7 +16,7 @@ This is what we **commit to communicate**. Pre-1.0 APIs can still change within 
 
 **Not promised in v0.1:** Homebrew/Scoop installs, dialects `nscript`/`matchns`, stable Go API.
 
-## v0.3 — previewed as `v0.3.0-preview.1`
+## v0.3 — previewed as `v0.3.0-preview.2`
 
 Breaking: the shell that runs your scripts changes, and file fields move into
 `engine:`. It was held until plugin loading worked — `engine:` without a loader
@@ -25,7 +25,7 @@ is half a promise, and this is the release where the promise gets made.
 A preview is a GitHub pre-release: `godo -e update` does not offer it, and
 neither Homebrew nor Scoop carries it. It is on
 [Releases](https://github.com/MY-RV/godo/releases) and on
-`go install github.com/my-rv/godo/cmd/godo@v0.3.0-preview.1`.
+`go install github.com/my-rv/godo/cmd/godo@v0.3.0-preview.2`.
 
 | Promise | |
 |---------|--|
@@ -46,7 +46,9 @@ Everything in the table above.
 ### Before v0.3.0 ships
 
 - Preview feedback. Plugin loading is new, and the preview is where it gets
-  found out.
+  found out. preview.1 on Windows already produced three fixes.
+- **Windows verification.** preview.2 fixes shell detection, CRLF catalogs and
+  `fs.slink`; the junction syscall behind `slink` has still been run by nobody.
 - The plugin protocol is **not** frozen by this preview. A plugin is pinned by
   digest, so a protocol change cannot silently break a catalog — it fails by
   naming the plugin.

@@ -8,45 +8,50 @@ import (
 	"unsafe"
 )
 
-// callerShell returns the shell that started this process, or "".
+// callerShell returns the shell godo is running under, or "".
 //
 // Windows has no $SHELL, and the environment cannot answer the question:
 // PSModulePath is set by PowerShell but inherited by everything it starts, so
-// a cmd.exe opened from PowerShell looks exactly like PowerShell. The parent
-// process is the only honest answer, so that is what this reads.
+// a cmd.exe opened from PowerShell looks exactly like PowerShell. The process
+// tree is the only honest answer, so that is what this reads — see
+// shellAncestor for why it is the tree and not just the parent.
 //
-// Empty when the parent is not a shell — a build tool, an editor, a CI runner —
-// which is the common case and why the caller falls back to %ComSpec%.
+// Empty when no shell is up there — a service, a CI runner — which is why the
+// caller falls back to %ComSpec%.
 func callerShell() string {
-	name, err := processName(uint32(os.Getppid()))
-	if err != nil || name == "" {
+	table, err := processTable()
+	if err != nil {
 		return ""
 	}
-	if !isKnownShell(shellBase(name)) {
-		return ""
-	}
-	return name
+	return shellAncestor(table, uint32(os.Getpid()))
 }
 
-// processName returns the executable name of pid via the process snapshot.
-func processName(pid uint32) (string, error) {
+// processTable snapshots every running process once.
+//
+// One snapshot rather than one per hop: walking the tree would otherwise take
+// a fresh snapshot at every level, and the tree could change underneath the
+// walk between them.
+func processTable() (map[uint32]proc, error) {
 	snap, err := syscall.CreateToolhelp32Snapshot(syscall.TH32CS_SNAPPROCESS, 0)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer syscall.CloseHandle(snap)
 
 	var e syscall.ProcessEntry32
 	e.Size = uint32(unsafe.Sizeof(e))
 	if err := syscall.Process32First(snap, &e); err != nil {
-		return "", err
+		return nil, err
 	}
+	table := make(map[uint32]proc, 256)
 	for {
-		if e.ProcessID == pid {
-			return syscall.UTF16ToString(e.ExeFile[:]), nil
+		table[e.ProcessID] = proc{
+			parent: e.ParentProcessID,
+			name:   syscall.UTF16ToString(e.ExeFile[:]),
 		}
 		if err := syscall.Process32Next(snap, &e); err != nil {
-			return "", err
+			// ERROR_NO_MORE_FILES ends the walk; the table is complete.
+			return table, nil
 		}
 	}
 }

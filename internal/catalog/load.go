@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,7 +29,7 @@ func Parse(data []byte, path string, dialects ...*DialectRegistry) (*Catalog, er
 	}
 
 	var root yaml.Node
-	if err := yaml.Unmarshal(data, &root); err != nil {
+	if err := yaml.Unmarshal(normalizeBreaks(data), &root); err != nil {
 		return nil, fmt.Errorf("%w: parse yaml: %v", ErrInvalidCatalog, err)
 	}
 	doc := &root
@@ -113,8 +114,29 @@ func Parse(data []byte, path string, dialects ...*DialectRegistry) (*Catalog, er
 	return cat, nil
 }
 
+// normalizeBreaks turns CRLF into LF before the YAML parser sees it.
+//
+// A catalog written on Windows has CRLF, and the parser files a comment
+// differently for it: a decorator directly above its key became the *previous*
+// key's foot comment instead of that key's head comment, so it decorated
+// nothing. A blank line above the comment happened to hide it, which is why it
+// read as "no space between the command and the comment breaks it".
+//
+// YAML treats CRLF as a line break, so normalizing is what the format already
+// says. It also keeps a \r out of block scalars, where it would otherwise be
+// handed to the shell as part of the command.
+func normalizeBreaks(data []byte) []byte {
+	if !bytes.Contains(data, []byte("\r\n")) {
+		return data
+	}
+	return bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+}
+
 func scriptFromNodes(key, val *yaml.Node, fileDialect DialectName, reg *DialectRegistry, path string) (Script, error) {
 	s := Script{Key: key.Value}
+	if err := rejectMisplacedDecorators(key, val); err != nil {
+		return Script{}, fmt.Errorf("%w: script %q: %v", ErrInvalidCatalog, s.Key, err)
+	}
 	dec, err := parseDecorators(key.HeadComment)
 	if err != nil {
 		return Script{}, fmt.Errorf("%w: script %q: %v", ErrInvalidCatalog, s.Key, err)
@@ -181,6 +203,58 @@ func validateMatcherKey(key string) error {
 		}
 	}
 	return nil
+}
+
+// decoratorNames are the @-words parseDecorators answers to.
+var decoratorNames = []string{"@deps", "@dependencies", "@dialect", "@runner"}
+
+// rejectMisplacedDecorators fails on a decorator YAML puts somewhere godo does
+// not read.
+//
+// Only the comment block *above* a key decorates it. A decorator written at
+// the end of the line lands on the value as a line comment, and one written
+// after the last key lands on that key as a foot comment; both were read by
+// nobody and dropped in silence. The catalog then ran with a dialect or a
+// dependency list its author believed they had written, which surfaces far
+// from the line that caused it — a script matching nothing, or a dependency
+// that never runs.
+//
+// So it is an error, and the error says where the decorator belongs. A comment
+// only trips this if it starts with a decorator godo knows: prose mentioning
+// "@deps" is a comment, and stays one.
+func rejectMisplacedDecorators(key, val *yaml.Node) error {
+	places := []struct {
+		comment string
+		where   string
+	}{
+		{key.LineComment, "at the end of the line"},
+		{val.LineComment, "at the end of the line"},
+		{key.FootComment, "below the key"},
+		{val.FootComment, "below the key"},
+	}
+	for _, p := range places {
+		if name := leadingDecorator(p.comment); name != "" {
+			return fmt.Errorf("%s is %s, where it is not read; a decorator goes on its own line above the key", name, p.where)
+		}
+	}
+	return nil
+}
+
+// leadingDecorator returns the decorator a comment opens with, or "".
+func leadingDecorator(comment string) string {
+	for _, line := range strings.Split(comment, "\n") {
+		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "#"))
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		for _, name := range decoratorNames {
+			if fields[0] == name {
+				return name
+			}
+		}
+	}
+	return ""
 }
 
 // decorators is the parsed @-block above a script key.

@@ -195,16 +195,16 @@ Selection, in order:
 |--|--|
 | `GODO_SHELL` | Always wins |
 | Unix | `$SHELL`, else `/bin/sh` |
-| Windows | the parent process when it is a shell, else `%ComSpec%` |
+| Windows | the nearest shell in the process tree, else `%ComSpec%` |
 
-godo answers "which shell am I in" from the parent process, which is the only
-thing that knows. No command run *inside* a shell can report it — it would only
+godo answers "which shell am I in" by walking up the process tree, which is
+the only thing that knows. No command run *inside* a shell can report it — it would only
 describe the shell godo just started. To confirm it yourself, in your own
 terminal: `echo $0` (sh, bash, zsh, dash, ksh), `echo $version` (fish),
 `$PSVersionTable.PSVersion` (PowerShell), `echo %COMSPEC%` (cmd). `godo -e
 runners` prints these too.
 
-Windows reads the parent process because the environment cannot answer:
+Windows reads the process tree because the environment cannot answer:
 PowerShell sets `PSModulePath` and everything it starts inherits it, so a
 `cmd.exe` opened from PowerShell would look like PowerShell. On Unix, `$SHELL`
 is the login shell rather than the one running right now — bash started inside
@@ -329,6 +329,21 @@ that runner's bodies are not expanded either way.
 ## Script decorators (JSDoc style)
 
 YAML comment block **immediately above** the script key. Apply to scripts only.
+
+Above the key is the only placement that works, and godo refuses the two that
+look like they should:
+
+```yaml
+  ins: bun install  # @dialect matcher     <- error
+  # @deps ins                              <- error, if nothing follows it
+```
+
+YAML files a trailing comment on the value and a comment after the last key on
+that key, neither of which decorates anything. Silently dropping them meant a
+catalog ran with a dialect or a dependency list its author believed they had
+written, and the symptom arrived far away — a script matching nothing, a
+dependency that never ran. A comment that merely mentions `@deps` in prose is
+still a comment; only one that *starts* with a decorator is refused.
 
 | Line | |
 |------|--|
