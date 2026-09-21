@@ -3,7 +3,11 @@ package plugin
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -344,5 +348,81 @@ func TestMounts_shapes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A response body is bytes. Carrying it as a JSON string replaced anything
+// that was not valid UTF-8, so an image arrived shorter than it left with
+// nothing raised.
+func TestFetch_carriesBytesIntact(t *testing.T) {
+	want := make([]byte, 256)
+	for i := range want {
+		want[i] = byte(i)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(want)
+	}))
+	defer srv.Close()
+
+	p := &Plugin{}
+	res := serveOp(t, p, Host{HTTP: srv.Client()}, Op{Op: OpFetch, URL: srv.URL})
+	if res.Error != "" {
+		t.Fatalf("error=%q", res.Error)
+	}
+	got, err := base64.StdEncoding.DecodeString(res.Base64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("got %d bytes, want %d", len(got), len(want))
+	}
+}
+
+// A status is a value the script reads, like a command's exit code.
+func TestFetch_statusIsNotAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(404)
+	}))
+	defer srv.Close()
+
+	res := serveOp(t, &Plugin{}, Host{HTTP: srv.Client()}, Op{Op: OpFetch, URL: srv.URL})
+	if res.Error != "" {
+		t.Fatalf("a 404 was reported as an error: %q", res.Error)
+	}
+	if res.Code != 404 || res.OK {
+		t.Fatalf("code=%d ok=%v", res.Code, res.OK)
+	}
+}
+
+func TestFetch_sendsMethodHeadersAndBody(t *testing.T) {
+	var gotMethod, gotHeader, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotHeader = r.Header.Get("X-Godo")
+		b, _ := io.ReadAll(r.Body)
+		gotBody = string(b)
+	}))
+	defer srv.Close()
+
+	serveOp(t, &Plugin{}, Host{HTTP: srv.Client()}, Op{
+		Op: OpFetch, URL: srv.URL, Method: "POST",
+		Headers: map[string]string{"X-Godo": "yes"}, Body: `{"a":1}`,
+	})
+	if gotMethod != "POST" || gotHeader != "yes" || gotBody != `{"a":1}` {
+		t.Fatalf("method=%q header=%q body=%q", gotMethod, gotHeader, gotBody)
+	}
+}
+
+// A plugin built against a newer protocol must fail, not hang: it is waiting
+// for a reply that would otherwise never come.
+func TestServe_unknownOpIsAnsweredNotSwallowed(t *testing.T) {
+	var answers strings.Builder
+	p := &Plugin{}
+	line := `{"op":"teleport","url":"x"}` + "\n"
+	if err := p.serve(strings.NewReader(line), &answers, Host{Stdout: io.Discard}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(answers.String(), "unknown op") {
+		t.Fatalf("answered %q", answers.String())
 	}
 }

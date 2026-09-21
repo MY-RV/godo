@@ -61,14 +61,32 @@ type Op struct {
 	Src   string `json:"src,omitempty"`
 	Dst   string `json:"dst,omitempty"`
 	Force bool   `json:"force,omitempty"`
+
+	// fetch
+	URL     string            `json:"url,omitempty"`
+	Method  string            `json:"method,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Body    string            `json:"body,omitempty"`
+	// Timeout is in seconds; zero means the host's default.
+	Timeout int `json:"timeout,omitempty"`
 }
 
 // Result is godo's answer to an op that needs one.
 type Result struct {
+	// Code is a process exit status, or an HTTP status for a fetch.
 	Code   int    `json:"code"`
 	OK     bool   `json:"ok"`
 	Stdout string `json:"stdout,omitempty"`
 	Stderr string `json:"stderr,omitempty"`
+	// Headers carries a fetch's response headers.
+	Headers map[string]string `json:"headers,omitempty"`
+	// Base64 carries a fetch's body, encoded.
+	//
+	// A response body is bytes. Carrying it as a JSON string means anything
+	// that is not valid UTF-8 comes out replaced — an image arrives shorter
+	// than it left, with nothing raised. Encoding costs a third more on the
+	// wire and cannot lose a byte.
+	Base64 string `json:"base64,omitempty"`
 	// Error is set when godo refused: an unknown op, or a capability the
 	// catalog did not grant. It is not a failing command — that is Code.
 	Error string `json:"error,omitempty"`
@@ -80,6 +98,14 @@ const (
 	OpExec = "exec"
 	// OpOut writes a line to the host's stdout. Needs no capability.
 	OpOut = "out"
-	// OpSlink creates a symlink. Needs config fs.slink.
+	// OpSlink creates a symlink.
 	OpSlink = "slink"
+	// OpFetch makes an HTTP request.
+	//
+	// A wasm guest has no sockets, so without this the only way to reach the
+	// network is to exec something that has them — curl, or whatever the
+	// machine happens to carry. That is the platform dependency a plugin
+	// exists to remove, so the request is made here, with the same library on
+	// every platform.
+	OpFetch = "fetch"
 )

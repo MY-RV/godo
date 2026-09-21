@@ -3,15 +3,18 @@ package plugin
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/sys"
@@ -22,7 +25,9 @@ import (
 // that fails, it is an op godo refuses to perform.
 type Host struct {
 	// Dir is the working directory for exec, normally the catalog's.
-	Dir    string
+	Dir string
+	// HTTP makes fetch requests; nil means http.DefaultClient.
+	HTTP   *http.Client
 	Stdout io.Writer
 	Stderr io.Writer
 	Stdin  io.Reader
@@ -133,8 +138,18 @@ func (p *Plugin) serve(r io.Reader, w io.Writer, host Host) error {
 		// the builtin one, not whatever the plugin arranged for the script.
 		// Treating that as a protocol error would mean a plugin's users could
 		// not split their code into files.
-		op, ok := readOp(line)
-		if !ok {
+		op, known := readOp(line)
+		if !known && op.Op != "" {
+			// JSON naming an op godo does not have: a plugin built against a
+			// newer protocol. Answering is what keeps that a clear failure
+			// instead of a hang — the plugin is waiting for a reply it will
+			// never otherwise get.
+			if err := enc.Encode(Result{Error: fmt.Sprintf("unknown op %q — this godo speaks api %d", op.Op, APIVersion)}); err != nil {
+				return fmt.Errorf("plugin %s: %w", p.Source, err)
+			}
+			continue
+		}
+		if !known {
 			if _, err := fmt.Fprintln(orStd(host.Stdout, os.Stdout), line); err != nil {
 				return fmt.Errorf("plugin %s: %w", p.Source, err)
 			}
@@ -147,6 +162,11 @@ func (p *Plugin) serve(r io.Reader, w io.Writer, host Host) error {
 			}
 		case OpExec:
 			res := p.execOp(op, host)
+			if err := enc.Encode(res); err != nil {
+				return fmt.Errorf("plugin %s: %w", p.Source, err)
+			}
+		case OpFetch:
+			res := p.fetchOp(op, host)
 			if err := enc.Encode(res); err != nil {
 				return fmt.Errorf("plugin %s: %w", p.Source, err)
 			}
@@ -174,6 +194,11 @@ func (p *Plugin) serve(r io.Reader, w io.Writer, host Host) error {
 // would take a secret on every op, which breaks every plugin already built to
 // answer without one — a worse failure, and for a coincidence inside a
 // catalog whose scripts could call exec directly anyway.
+//
+// A line that names an op godo does not have comes back with Op set and false:
+// the caller answers it with an error rather than printing it, because a
+// plugin waiting for a reply that never arrives hangs, and a hang is a worse
+// failure than a stray line of output.
 func readOp(line string) (Op, bool) {
 	if !strings.HasPrefix(line, "{") {
 		return Op{}, false
@@ -183,10 +208,10 @@ func readOp(line string) (Op, bool) {
 		return Op{}, false
 	}
 	switch op.Op {
-	case OpExec, OpOut, OpSlink:
+	case OpExec, OpOut, OpSlink, OpFetch:
 		return op, true
 	}
-	return Op{}, false
+	return op, false
 }
 
 // execOp runs an argument vector.
@@ -215,6 +240,66 @@ func (p *Plugin) execOp(op Op, host Host) Result {
 	}
 	res.OK = res.Code == 0
 	return res
+}
+
+// fetchOp makes an HTTP request on the guest's behalf.
+//
+// A wasm guest has no sockets. Without this, reaching the network means
+// exec'ing whatever the machine happens to carry, which is the platform
+// dependency a plugin exists to remove: a script that works here and not on a
+// teammate's laptop because one of them has curl is the problem, not a
+// workaround for it. Go's client is the same on every platform godo ships to.
+//
+// A non-2xx is not an error: it is a status the script gets to read, the same
+// way a failed command is a code rather than a raised exception.
+func (p *Plugin) fetchOp(op Op, host Host) Result {
+	if op.URL == "" {
+		return Result{Error: "fetch: no url"}
+	}
+	method := op.Method
+	if method == "" {
+		method = http.MethodGet
+	}
+	var body io.Reader
+	if op.Body != "" {
+		body = strings.NewReader(op.Body)
+	}
+	req, err := http.NewRequest(method, op.URL, body)
+	if err != nil {
+		return Result{Error: fmt.Sprintf("fetch: %v", err)}
+	}
+	for k, v := range op.Headers {
+		req.Header.Set(k, v)
+	}
+	client := host.HTTP
+	if client == nil {
+		// A request with no deadline is a script that hangs on a server that
+		// never answers, with nothing to read and nothing to kill.
+		timeout := time.Duration(op.Timeout) * time.Second
+		if timeout <= 0 {
+			timeout = 30 * time.Second
+		}
+		client = &http.Client{Timeout: timeout}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return Result{Error: fmt.Sprintf("fetch %s: %v", op.URL, err)}
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return Result{Error: fmt.Sprintf("fetch %s: %v", op.URL, err)}
+	}
+	headers := make(map[string]string, len(resp.Header))
+	for k := range resp.Header {
+		headers[k] = resp.Header.Get(k)
+	}
+	return Result{
+		Code:    resp.StatusCode,
+		OK:      resp.StatusCode >= 200 && resp.StatusCode < 300,
+		Base64:  base64.StdEncoding.EncodeToString(data),
+		Headers: headers,
+	}
 }
 
 func (p *Plugin) slinkOp(op Op, host Host) Result {

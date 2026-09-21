@@ -49,6 +49,11 @@ Breaking. The shell that runs your scripts changed.
   a Python or shell script gets an editor that understands it. Inclusion rather
   than expansion: it happens when the body is read, works for every runner, and
   leaves `${godo:…}` inside the file alone.
+- **A `fetch` op**: plugins can make HTTP requests through godo, which does
+  them with Go's client — the same on every platform godo ships to. Without it
+  the only route to the network is exec'ing `curl`, which is the platform
+  dependency a plugin exists to remove. Bodies travel base64 because they are
+  bytes, and requests time out after 30 seconds.
 - **`godo -e plugins install <source>`** fetches an artifact, computes its
   digest, stores it under `<user cache>/godo/plugins`, and writes the entry into
   `godo.yaml` — preserving the comments, blank lines and block scalars around

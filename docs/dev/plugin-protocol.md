@@ -93,6 +93,9 @@ unbuffered, so a plugin that spoke first would deadlock.
 | Op | Answered |
 |----|----------|
 | `exec` | yes |
+| `fetch` | yes |
+| `slink` | yes |
+| `out` | **no** |
 | `out` | no | — |
 | `slink` | yes | `config.fs.slink` |
 
