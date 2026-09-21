@@ -128,9 +128,17 @@ func (p *Plugin) serve(r io.Reader, w io.Writer, host Host) error {
 		if line == "" {
 			continue
 		}
-		var op Op
-		if err := json.Unmarshal([]byte(line), &op); err != nil {
-			return fmt.Errorf("plugin %s: unreadable op %q: %w", p.Source, line, err)
+		// A line that is not an op is output. A guest has one stdout, and
+		// everything inside it writes there — an imported module's print is
+		// the builtin one, not whatever the plugin arranged for the script.
+		// Treating that as a protocol error would mean a plugin's users could
+		// not split their code into files.
+		op, ok := readOp(line)
+		if !ok {
+			if _, err := fmt.Fprintln(orStd(host.Stdout, os.Stdout), line); err != nil {
+				return fmt.Errorf("plugin %s: %w", p.Source, err)
+			}
+			continue
 		}
 		switch op.Op {
 		case OpOut:
@@ -147,16 +155,38 @@ func (p *Plugin) serve(r io.Reader, w io.Writer, host Host) error {
 			if err := enc.Encode(res); err != nil {
 				return fmt.Errorf("plugin %s: %w", p.Source, err)
 			}
-		default:
-			if err := enc.Encode(Result{Error: fmt.Sprintf("unknown op %q", op.Op)}); err != nil {
-				return fmt.Errorf("plugin %s: %w", p.Source, err)
-			}
 		}
 	}
 	if err := scan.Err(); err != nil && !errors.Is(err, io.ErrClosedPipe) {
 		return fmt.Errorf("plugin %s: %w", p.Source, err)
 	}
 	return nil
+}
+
+// readOp parses a line as an op, or reports that it is output.
+//
+// Both halves matter. A line that is not JSON is plain output. A line that is
+// JSON but carries no op godo knows is output too — scripts print JSON all the
+// time, and swallowing a data structure because it has the shape of a message
+// would be worse than the error it avoids.
+//
+// A line that is a valid op godo does obey, whoever printed it. Closing that
+// would take a secret on every op, which breaks every plugin already built to
+// answer without one — a worse failure, and for a coincidence inside a
+// catalog whose scripts could call exec directly anyway.
+func readOp(line string) (Op, bool) {
+	if !strings.HasPrefix(line, "{") {
+		return Op{}, false
+	}
+	var op Op
+	if err := json.Unmarshal([]byte(line), &op); err != nil {
+		return Op{}, false
+	}
+	switch op.Op {
+	case OpExec, OpOut, OpSlink:
+		return op, true
+	}
+	return Op{}, false
 }
 
 // execOp runs an argument vector.
