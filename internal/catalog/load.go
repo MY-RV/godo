@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,7 +29,7 @@ func Parse(data []byte, path string, dialects ...*DialectRegistry) (*Catalog, er
 	}
 
 	var root yaml.Node
-	if err := yaml.Unmarshal(data, &root); err != nil {
+	if err := yaml.Unmarshal(normalizeBreaks(data), &root); err != nil {
 		return nil, fmt.Errorf("%w: parse yaml: %v", ErrInvalidCatalog, err)
 	}
 	doc := &root
@@ -111,6 +112,24 @@ func Parse(data []byte, path string, dialects ...*DialectRegistry) (*Catalog, er
 		cat.Scripts = append(cat.Scripts, script)
 	}
 	return cat, nil
+}
+
+// normalizeBreaks turns CRLF into LF before the YAML parser sees it.
+//
+// A catalog written on Windows has CRLF, and the parser files a comment
+// differently for it: a decorator directly above its key became the *previous*
+// key's foot comment instead of that key's head comment, so it decorated
+// nothing. A blank line above the comment happened to hide it, which is why it
+// read as "no space between the command and the comment breaks it".
+//
+// YAML treats CRLF as a line break, so normalizing is what the format already
+// says. It also keeps a \r out of block scalars, where it would otherwise be
+// handed to the shell as part of the command.
+func normalizeBreaks(data []byte) []byte {
+	if !bytes.Contains(data, []byte("\r\n")) {
+		return data
+	}
+	return bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 }
 
 func scriptFromNodes(key, val *yaml.Node, fileDialect DialectName, reg *DialectRegistry, path string) (Script, error) {

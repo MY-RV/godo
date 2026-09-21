@@ -111,6 +111,13 @@ unbuffered, so a plugin that spoke first would deadlock.
 {"code":0,"ok":true,"stdout":"","stderr":"","error":""}
 ```
 
+`slink` makes the link the platform offers: a **symlink** on Unix, and on
+Windows a **junction** for a directory or a **hard link** for a file. Windows
+treats a symlink as a privilege rather than a file operation, so asking for one
+fails for an ordinary user; a junction and a hard link do not. Consequence: on
+Windows the target must exist, because which link to make depends on what it
+is, and a hard link cannot cross volumes.
+
 `error` is godo refusing — an unknown op, or a capability the catalog did not
 grant. A command that ran and failed is `code`, not `error`.
 

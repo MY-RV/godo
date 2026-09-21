@@ -14,17 +14,25 @@ documentation and unverified; it was also wrong.
   answer fell through to `%ComSpec%`. It now walks up the process tree to the
   nearest shell, which also covers npm, bun and make wrappers and an editor's
   terminal.
-- **A decorator at the end of a line was dropped in silence.**
-  `ins: bun install  # @dialect matcher` is a YAML line comment on the value,
-  and nothing reads it, so the catalog ran with a dialect its author believed
-  they had written — and failed somewhere else. Same for a decorator after the
-  last key, which YAML files as that key's foot comment. Both are errors now,
-  naming the decorator and where it belongs. Prose that merely mentions `@deps`
-  is still a comment.
-- **`fs.slink` on Windows now says what to do.** Creating a symlink there is a
-  privilege, not a file operation, so an ordinary user got "A required
-  privilege is not held by the client" — true, and useless unless you already
-  know Developer Mode is what grants it. The error says so.
+- **A catalog written on Windows lost its decorators.** With CRLF the YAML
+  parser files the comment above a key as the *previous* key's foot comment, so
+  `# @dialect matcher` decorated nothing — unless a blank line happened to sit
+  above it, which is why it read as "no space between the command and the
+  comment breaks it". Line endings are normalized before parsing, which YAML
+  already calls the same line break. It also keeps a `\r` out of a block
+  scalar, where it was being handed to the shell as part of the command.
+- **`fs.slink` did nothing on Windows.** It called `os.Symlink`, and a symlink
+  there is a privilege rather than a file operation, so an ordinary user got
+  "A required privilege is not held by the client". It now uses the link
+  Windows actually offers — a **junction** for a directory, a **hard link** for
+  a file — neither of which needs a privilege. The op is the same op; the
+  mechanism is the platform's.
+
+### Added
+- A decorator YAML puts somewhere godo does not read is now an error naming
+  where it belongs, instead of being dropped: `ins: x  # @deps y` files the
+  comment on the value, and a decorator after the last key files as that key's
+  foot comment. Prose that merely mentions `@deps` is still a comment.
 
 ### Changed
 - `godo -e runners` says **how** the default shell was chosen — `your $SHELL`,
