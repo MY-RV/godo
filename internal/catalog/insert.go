@@ -15,6 +15,94 @@ type PluginEntry struct {
 	Config   string // raw YAML lines for the config block, or ""
 }
 
+// UpsertPlugin returns src with entry added under engine.plugins, replacing
+// any existing entry that provides the same things.
+//
+// Installing a plugin a catalog already declares means bringing the
+// declaration in line with what was just fetched — a placeholder digest
+// becoming a real one is the ordinary case. Appending instead would leave two
+// entries claiming one runner, which the loader rejects.
+func UpsertPlugin(src []byte, entry PluginEntry) ([]byte, error) {
+	if len(entry.Provides) == 0 {
+		return InsertPlugin(src, entry)
+	}
+	doc, err := docNode(src)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(string(src), "\n")
+	_, engineVal := childNode(doc, "engine")
+	if engineVal == nil || engineVal.Kind != yaml.MappingNode {
+		return InsertPlugin(src, entry)
+	}
+	_, pluginsVal := childNode(engineVal, "plugins")
+	if pluginsVal == nil || pluginsVal.Kind != yaml.SequenceNode {
+		return InsertPlugin(src, entry)
+	}
+	for _, item := range pluginsVal.Content {
+		if !sameProvides(item, entry.Provides) {
+			continue
+		}
+		from := item.Line - 1
+		to := endOfNode(item, lines)
+		// The config that is already there stays. What this plugin may do is
+		// the catalog author's decision, reached once and often narrowed;
+		// resetting it to a default on every install would quietly re-grant
+		// what someone took away, and quietly drop what they added.
+		if kept := configLines(item, lines); kept != "" {
+			entry.Config = kept
+		}
+		block := entryLines(entry, strings.Repeat(" ", item.Column-3)+"item")
+		out := append([]string{}, lines[:from]...)
+		out = append(out, block...)
+		out = append(out, lines[to:]...)
+		return []byte(strings.Join(out, "\n")), nil
+	}
+	return InsertPlugin(src, entry)
+}
+
+// configLines returns an entry's config block, re-indented to sit under a
+// fresh entry, or "" when it declares none.
+func configLines(item *yaml.Node, lines []string) string {
+	key, val := childNode(item, "config")
+	if key == nil || val == nil {
+		return ""
+	}
+	from := key.Line // the line after "config:"
+	to := endOfNode(val, lines)
+	if from >= to || to > len(lines) {
+		return ""
+	}
+	strip := val.Column - 1
+	var out []string
+	for _, l := range lines[from:to] {
+		if len(l) >= strip {
+			l = l[strip:]
+		} else {
+			l = strings.TrimLeft(l, " ")
+		}
+		out = append(out, l)
+	}
+	return strings.Join(out, "\n")
+}
+
+// sameProvides reports whether a plugin entry node claims exactly these names.
+func sameProvides(item *yaml.Node, want []string) bool {
+	if item.Kind != yaml.MappingNode {
+		return false
+	}
+	_, val := childNode(item, "provides")
+	if val == nil || val.Kind != yaml.SequenceNode || len(val.Content) != len(want) {
+		return false
+	}
+	for i, n := range val.Content {
+		if n.Value != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // InsertPlugin returns src with entry added under engine.plugins.
 //
 // It splices lines rather than re-encoding the document. A catalog is written
@@ -26,19 +114,9 @@ func InsertPlugin(src []byte, entry PluginEntry) ([]byte, error) {
 	if entry.Source == "" || entry.SHA256 == "" {
 		return nil, fmt.Errorf("plugin entry needs a source and a sha256")
 	}
-	var root yaml.Node
-	if err := yaml.Unmarshal(src, &root); err != nil {
-		return nil, fmt.Errorf("%w: parse yaml: %v", ErrInvalidCatalog, err)
-	}
-	doc := &root
-	if root.Kind == yaml.DocumentNode {
-		if len(root.Content) == 0 {
-			return nil, fmt.Errorf("%w: empty yaml document", ErrInvalidCatalog)
-		}
-		doc = root.Content[0]
-	}
-	if doc.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("%w: root must be a mapping", ErrInvalidCatalog)
+	doc, err := docNode(src)
+	if err != nil {
+		return nil, err
 	}
 
 	lines := strings.Split(string(src), "\n")
@@ -107,6 +185,24 @@ func endOfNode(n *yaml.Node, lines []string) int {
 		last = i + 1
 	}
 	return last
+}
+
+func docNode(src []byte) (*yaml.Node, error) {
+	var root yaml.Node
+	if err := yaml.Unmarshal(src, &root); err != nil {
+		return nil, fmt.Errorf("%w: parse yaml: %v", ErrInvalidCatalog, err)
+	}
+	doc := &root
+	if root.Kind == yaml.DocumentNode {
+		if len(root.Content) == 0 {
+			return nil, fmt.Errorf("%w: empty yaml document", ErrInvalidCatalog)
+		}
+		doc = root.Content[0]
+	}
+	if doc.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("%w: root must be a mapping", ErrInvalidCatalog)
+	}
+	return doc, nil
 }
 
 func childNode(m *yaml.Node, key string) (k, v *yaml.Node) {

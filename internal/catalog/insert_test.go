@@ -140,3 +140,116 @@ func TestInsertPlugin_rejectsIncomplete(t *testing.T) {
 		t.Fatal("want an error for a non-mapping root")
 	}
 }
+
+// Installing a plugin the catalog already declares updates it, rather than
+// leaving two entries claiming one runner.
+func TestUpsertPlugin_replacesTheEntryForTheSameRunner(t *testing.T) {
+	src := `version: "0.1"
+
+engine:
+  plugins:
+    - source: https://example.test/micropy.wasm
+      sha256: "replace me"
+      provides: [runner:micropy]
+      config:
+        proc: {exec: true}
+        fs: {mount: true}
+
+scripts:
+  # keep me
+  t: echo hi
+`
+	got, err := catalog.UpsertPlugin([]byte(src), catalog.PluginEntry{
+		Source:   "./local.wasm",
+		SHA256:   "realdigest",
+		Provides: []string{"runner:micropy"},
+		Config:   "proc: {exec: true}",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat, err := catalog.Parse(got, "x")
+	if err != nil {
+		t.Fatalf("does not parse: %v\n%s", err, got)
+	}
+	if len(cat.Engine.Plugins) != 1 {
+		t.Fatalf("plugins=%d, want the entry replaced:\n%s", len(cat.Engine.Plugins), got)
+	}
+	p := cat.Engine.Plugins[0]
+	if p.SHA256 != "realdigest" || p.Source != "./local.wasm" {
+		t.Fatalf("entry=%+v", p)
+	}
+	if !strings.Contains(string(got), "# keep me") {
+		t.Fatalf("lost a comment:\n%s", got)
+	}
+	if len(cat.Scripts) != 1 {
+		t.Fatalf("scripts=%d", len(cat.Scripts))
+	}
+}
+
+// A different runner is added beside, not over.
+func TestUpsertPlugin_addsWhenNothingProvidesTheSame(t *testing.T) {
+	src := "version: \"0.1\"\nengine:\n  plugins:\n" +
+		"    - source: ./a.wasm\n      sha256: aaa\n      provides: [runner:a]\n" +
+		"scripts:\n  t: echo hi\n"
+	got, err := catalog.UpsertPlugin([]byte(src), catalog.PluginEntry{
+		Source: "./b.wasm", SHA256: "bbb", Provides: []string{"runner:b"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat, err := catalog.Parse(got, "x")
+	if err != nil {
+		t.Fatalf("does not parse: %v\n%s", err, got)
+	}
+	if len(cat.Engine.Plugins) != 2 {
+		t.Fatalf("plugins=%d:\n%s", len(cat.Engine.Plugins), got)
+	}
+}
+
+// What a plugin may do is the author's decision. install brings the digest in
+// line; it does not re-grant what someone took away.
+func TestUpsertPlugin_keepsTheExistingConfig(t *testing.T) {
+	src := `version: "0.1"
+
+engine:
+  plugins:
+    - source: https://example.test/micropy.wasm
+      sha256: "replace me"
+      provides: [runner:micropy]
+      config:
+        proc: {exec: true}
+        fs: {mount: true, slink: true}
+        time: {wall: true}
+
+scripts:
+  t: echo hi
+`
+	got, err := catalog.UpsertPlugin([]byte(src), catalog.PluginEntry{
+		Source:   "./local.wasm",
+		SHA256:   "realdigest",
+		Provides: []string{"runner:micropy"},
+		Config:   "proc: {exec: true}", // the default install would have written
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat, err := catalog.Parse(got, "x")
+	if err != nil {
+		t.Fatalf("does not parse: %v\n%s", err, got)
+	}
+	cfg := cat.Engine.Plugins[0].Config
+	fs, ok := cfg["fs"].(map[string]any)
+	if !ok {
+		t.Fatalf("fs grants dropped: %+v\n%s", cfg, got)
+	}
+	if fs["mount"] != true || fs["slink"] != true {
+		t.Fatalf("fs=%+v", fs)
+	}
+	if _, ok := cfg["time"]; !ok {
+		t.Fatalf("time grant dropped: %+v", cfg)
+	}
+	if cat.Engine.Plugins[0].SHA256 != "realdigest" {
+		t.Fatalf("digest not updated: %+v", cat.Engine.Plugins[0])
+	}
+}

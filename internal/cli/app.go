@@ -269,7 +269,7 @@ func (a *App) installNew(ctx context.Context, store pluginstore.Store, cat *cata
 		return err
 	}
 	for _, p := range cat.Engine.Plugins {
-		if p.SHA256 == digest {
+		if p.SHA256 == digest && p.Source == source {
 			fmt.Fprintf(a.Stdout, "already declared: %s\n  %s\n", p.Source, stored)
 			return nil
 		}
@@ -283,7 +283,7 @@ func (a *App) installNew(ctx context.Context, store pluginstore.Store, cat *cata
 	if err != nil {
 		return err
 	}
-	out, err := catalog.InsertPlugin(src, catalog.PluginEntry{
+	out, err := catalog.UpsertPlugin(src, catalog.PluginEntry{
 		Source:   source,
 		SHA256:   digest,
 		Provides: provides,
