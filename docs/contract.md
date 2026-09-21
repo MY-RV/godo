@@ -101,12 +101,28 @@ numbers.
 
 ### `engine.plugins`
 
-**No build loads plugins yet.** Entries are parsed and validated so the shape
-is settled and a catalog can already declare what it expects.
+```
+godo -e plugins                    what this catalog declares, and its state
+godo -e plugins install            fetch everything it declares
+godo -e plugins install <source>   add one, and fetch it
+```
+
+`install <source>` computes the digest from the artifact and writes the entry
+into `godo.yaml`. The digest is never asked for: a person cannot check a hash
+by reading it, so asking for one is how wrong hashes get committed.
+
+Artifacts live in `<user cache>/godo/plugins`, named by digest. A file sitting
+beside the `godo.yaml` is loaded from where it is — asking someone to install
+what they can already see would be ceremony, and its digest is checked either
+way. Anything else must be installed first; a run is not the moment to discover
+that something has to be downloaded.
+
+`http://` sources are refused. An artifact is code, and its integrity cannot
+rest on a transport anyone on the path can rewrite.
 
 | Field | |
 |-------|--|
-| `source` | Required. Where the plugin comes from |
+| `source` | Required. An `https://` URL, or a path relative to the `godo.yaml` |
 | `sha256` | **Required.** A plugin is third-party code that runs when someone types `godo test`; without a digest there is nothing to verify it is the code that was reviewed |
 | `provides` | Required. `"<kind>:<name>"` entries, kind being `runner` or `dialect`. Two plugins may not provide the same one |
 | `config` | Optional, and entirely the plugin's: its keys, its meaning, its defaults. godo carries it across without reading it |

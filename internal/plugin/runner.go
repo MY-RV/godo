@@ -71,15 +71,31 @@ func nonNil(m map[string]string) map[string]string {
 	return m
 }
 
+// Resolver turns a declared plugin into a path on this machine.
+//
+// A catalog says which artifact a script needs; where that artifact is, is a
+// separate question, and one the engine has no business answering. godo hands
+// in its store; an embedder hands in whatever it uses, or nil to read the
+// source as a path.
+type Resolver func(digest, source string) (string, error)
+
 // Register loads every plugin a catalog declares and registers the runners
 // they provide.
 //
 // A plugin that will not load stops the run. A catalog that names a plugin has
 // already decided it is part of the build; carrying on without it would mean
 // silently running something other than what the file says.
-func Register(ctx context.Context, rt *Runtime, cat *catalog.Catalog, reg *catalog.RunnerRegistry, root string, stdout, stderr io.Writer, stdin io.Reader) error {
+func Register(ctx context.Context, rt *Runtime, cat *catalog.Catalog, reg *catalog.RunnerRegistry, root string, stdout, stderr io.Writer, stdin io.Reader, resolve Resolver) error {
 	for _, spec := range cat.Engine.Plugins {
-		p, err := rt.Load(ctx, spec.Source, spec.SHA256, root, spec.Provides, spec.Config)
+		from := spec.Source
+		if resolve != nil {
+			stored, err := resolve(spec.SHA256, spec.Source)
+			if err != nil {
+				return err
+			}
+			from = stored
+		}
+		p, err := rt.Load(ctx, from, spec.SHA256, root, spec.Provides, spec.Config)
 		if err != nil {
 			return err
 		}

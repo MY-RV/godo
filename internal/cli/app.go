@@ -14,6 +14,7 @@ import (
 	"github.com/my-rv/godo/internal/catalog"
 	"github.com/my-rv/godo/internal/execshell"
 	"github.com/my-rv/godo/internal/plugin"
+	"github.com/my-rv/godo/internal/pluginstore"
 	"github.com/my-rv/godo/internal/update"
 )
 
@@ -29,7 +30,9 @@ type App struct {
 	Runner catalog.Runner
 	// UpdateClient overrides release checks (tests).
 	UpdateClient *update.Client
-	Executable   func() (string, error)
+	// PluginStore overrides where artifacts are kept (tests).
+	PluginStore *pluginstore.Store
+	Executable  func() (string, error)
 }
 
 // New returns an App wired to process stdio.
@@ -62,6 +65,9 @@ func (a *App) Run(args []string) error {
 	}
 	if mode == modeRunners {
 		return a.listRunners(a.nearestCatalog())
+	}
+	if mode == modePlugins || mode == modePluginsInstall {
+		return a.plugins(mode == modePluginsInstall, tokens)
 	}
 	if mode == modeUpdate || mode == modeUpdateCheck {
 		return a.runUpdate(mode == modeUpdateCheck)
@@ -99,7 +105,22 @@ func (a *App) Run(args []string) error {
 		ctx := context.Background()
 		rt := plugin.NewRuntime(ctx)
 		defer rt.Close(ctx)
-		if err := plugin.Register(ctx, rt, cat, runners, root, a.Stdout, a.Stderr, a.Stdin); err != nil {
+		store := a.store()
+		resolve := func(digest, source string) (string, error) {
+			if store.Has(digest) {
+				return store.Path(digest)
+			}
+			// A file sitting next to the catalog is already here; asking
+			// someone to install what they can see is nonsense. Its digest is
+			// checked either way, so nothing is skipped but the copying.
+			if local := localSource(root, source); local != "" {
+				return local, nil
+			}
+			// Anything else has to be fetched, and a run is not the moment to
+			// discover that.
+			return "", fmt.Errorf("plugin %s is not installed\n  run: godo -e plugins install", source)
+		}
+		if err := plugin.Register(ctx, rt, cat, runners, root, a.Stdout, a.Stderr, a.Stdin, resolve); err != nil {
 			return err
 		}
 	}
@@ -201,6 +222,159 @@ func (a *App) runUpdate(checkOnly bool) error {
 //
 // "here" is the point: the native shells are whatever this machine has, so the
 // list is a fact about the machine, not about godo.
+// plugins lists what a catalog declares, or installs it.
+//
+// Declaring a plugin and having it on this machine are different things: the
+// catalog says which artifact a script needs, the store is where that artifact
+// actually is. install is what turns the first into the second.
+func (a *App) plugins(install bool, args []string) error {
+	cwd, err := a.cwd()
+	if err != nil {
+		return err
+	}
+	path, err := catalog.FindFile(cwd)
+	if err != nil {
+		return err
+	}
+	cat, err := catalog.LoadFile(path)
+	if err != nil {
+		return err
+	}
+	store := a.store()
+	ctx := context.Background()
+
+	// A source typed on the command line is relative to where the person is;
+	// one written in the catalog is relative to the catalog.
+	if install && len(args) > 0 {
+		return a.installNew(ctx, store, cat, path, cwd, args)
+	}
+	if install {
+		return a.installDeclared(ctx, store, cat, filepath.Dir(path))
+	}
+	return a.listPlugins(store, cat)
+}
+
+// installNew adds a plugin the catalog does not declare yet.
+//
+// The digest is not asked for — it is whatever the artifact turns out to
+// contain, computed here and written into the catalog. Asking a person to type
+// a hash they cannot check is how wrong hashes get committed.
+func (a *App) installNew(ctx context.Context, store pluginstore.Store, cat *catalog.Catalog, path, base string, args []string) error {
+	if len(args) > 1 {
+		return fmt.Errorf("-e plugins install: one source at a time, got %v", args)
+	}
+	source := args[0]
+	digest, stored, err := store.Fetch(ctx, base, source)
+	if err != nil {
+		return err
+	}
+	for _, p := range cat.Engine.Plugins {
+		if p.SHA256 == digest {
+			fmt.Fprintf(a.Stdout, "already declared: %s\n  %s\n", p.Source, stored)
+			return nil
+		}
+	}
+
+	provides, err := providedRunners(source)
+	if err != nil {
+		return err
+	}
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	out, err := catalog.InsertPlugin(src, catalog.PluginEntry{
+		Source:   source,
+		SHA256:   digest,
+		Provides: provides,
+		Config:   "proc: {exec: true}",
+	})
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		return err
+	}
+	fmt.Fprintf(a.Stdout, "installed %s\n  sha256   %s\n  stored   %s\n  declared %s\n\n",
+		source, digest, stored, path)
+	fmt.Fprintf(a.Stdout, "It provides %s, and was granted proc.exec.\n", strings.Join(provides, ", "))
+	fmt.Fprintln(a.Stdout, "Add fs.mount, fs.slink or time.wall under its config if it needs them.")
+	return nil
+}
+
+// providedRunners derives the runner name from the artifact's filename.
+//
+// The name a plugin answers to is the catalog's to choose: nothing inside a
+// .wasm declares it, and inventing a manifest format to carry one string would
+// be a second contract to maintain. The filename is the honest default, and
+// the line it writes is there to be edited.
+func providedRunners(source string) ([]string, error) {
+	base := filepath.Base(strings.TrimSuffix(source, ".wasm"))
+	base = strings.TrimPrefix(base, "godo-")
+	if base == "" || base == "." || base == string(filepath.Separator) {
+		return nil, fmt.Errorf("cannot tell what %q provides; name the artifact <runner>.wasm", source)
+	}
+	return []string{"runner:" + base}, nil
+}
+
+// installDeclared fetches every artifact the catalog names.
+func (a *App) installDeclared(ctx context.Context, store pluginstore.Store, cat *catalog.Catalog, base string) error {
+	if len(cat.Engine.Plugins) == 0 {
+		fmt.Fprintln(a.Stdout, "this catalog declares no plugins")
+		return nil
+	}
+	for _, p := range cat.Engine.Plugins {
+		stored, err := store.Ensure(ctx, base, p.SHA256, p.Source)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(a.Stdout, "%-16s %s\n", strings.Join(p.Provides, " "), stored)
+	}
+	return nil
+}
+
+func (a *App) listPlugins(store pluginstore.Store, cat *catalog.Catalog) error {
+	if len(cat.Engine.Plugins) == 0 {
+		fmt.Fprintln(a.Stdout, "this catalog declares no plugins")
+		return nil
+	}
+	missing := false
+	for _, p := range cat.Engine.Plugins {
+		state := "installed"
+		if !store.Has(p.SHA256) {
+			state = "not installed"
+			missing = true
+		}
+		fmt.Fprintf(a.Stdout, "%-16s %-14s %s\n", strings.Join(p.Provides, " "), state, p.Source)
+	}
+	if missing {
+		fmt.Fprintln(a.Stdout, "\nRun: godo -e plugins install")
+	}
+	return nil
+}
+
+// localSource returns the path of a source that is already on disk, or "".
+func localSource(root, source string) string {
+	if strings.Contains(source, "://") && !strings.HasPrefix(source, "file://") {
+		return ""
+	}
+	p := strings.TrimPrefix(source, "file://")
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(root, p)
+	}
+	if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() {
+		return ""
+	}
+	return p
+}
+
+func (a *App) store() pluginstore.Store {
+	if a.PluginStore != nil {
+		return *a.PluginStore
+	}
+	return pluginstore.Store{}
+}
+
 // nearestCatalog loads the catalog for -e runners, or nil.
 //
 // The listing is useful outside a repo, so a missing or broken catalog is not
@@ -329,6 +503,8 @@ const (
 	modeUpdate
 	modeUpdateCheck
 	modeRunners
+	modePlugins
+	modePluginsInstall
 )
 
 // ParseFlags parses context flags before script tokens.
@@ -385,6 +561,15 @@ func parseEngineCommand(tokens []string) (mode mode, rest []string, err error) {
 			return 0, nil, fmt.Errorf("-e runners: unexpected arguments %v", tokens[1:])
 		}
 		return modeRunners, nil, nil
+	case "plugins":
+		switch {
+		case len(tokens) == 1:
+			return modePlugins, nil, nil
+		case tokens[1] == "install":
+			return modePluginsInstall, tokens[2:], nil
+		default:
+			return 0, nil, fmt.Errorf("-e plugins: usage: -e plugins | -e plugins install [source]")
+		}
 	case "update":
 		switch {
 		case len(tokens) == 1:
@@ -436,6 +621,8 @@ func EngineUsage(w io.Writer) {
 Built-in commands (not godo.yaml scripts):
   version         print binary version
   runners         list runners usable here
+  plugins         what this catalog declares, and whether it is installed
+  plugins install fetch them; with a source, add it and fetch it
   update          download latest GitHub Release for this OS/arch
   update check    report whether an update is available
   help            this help

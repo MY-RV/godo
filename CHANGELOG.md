@@ -45,6 +45,11 @@ Breaking. The shell that runs your scripts changed.
   they are parsed and validated so the shape is settled, and a script asking
   for a runner a plugin provides fails by naming that plugin instead of reading
   as a typo.
+- **`godo -e plugins install <source>`** fetches an artifact, computes its
+  digest, stores it under `<user cache>/godo/plugins`, and writes the entry into
+  `godo.yaml` — preserving the comments, blank lines and block scalars around
+  it. Without a source it fetches everything the catalog declares.
+  `godo -e plugins` lists what is declared and whether it is here.
 - **`godo -e runners`** lists what is usable on the machine you are on, and how
   to confirm which shell you are in when the detected one looks wrong.
 - `--ls <tokens>` prints `@runner` beside `@dialect`.

@@ -19,6 +19,8 @@ Normative source: [contract.md](../contract.md).
 | | |
 |--|--|
 | `-e runners` | List runners usable on this machine |
+| `-e plugins` | What the catalog declares, and whether it is installed |
+| `-e plugins install [source]` | Fetch declared plugins, or add and fetch one |
 | `-e version` | Print binary version |
 | `-e update` | Install newer Release asset |
 | `-e update check` | Check only |

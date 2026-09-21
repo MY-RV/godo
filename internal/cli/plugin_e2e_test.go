@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/my-rv/godo"
+	"github.com/my-rv/godo/internal/pluginstore"
 )
 
 var (
@@ -195,5 +196,108 @@ func TestE2E_pluginDigestMismatchRefusesToRun(t *testing.T) {
 	}
 	if _, serr := os.Stat(filepath.Join(cwd, "one")); serr == nil {
 		t.Fatal("a plugin with the wrong digest ran")
+	}
+}
+
+// Contract: install, then run. The whole reason the command exists.
+func TestE2E_pluginsInstallThenRun(t *testing.T) {
+	cwd := t.TempDir()
+	store := pluginstore.Store{Dir: filepath.Join(t.TempDir(), "store")}
+
+	data, err := os.ReadFile(buildExamplePlugin(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact := filepath.Join(cwd, "godo-lines.wasm")
+	if err := os.WriteFile(artifact, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A catalog with a comment, to prove installing does not eat the file.
+	writeGodoYAML(t, cwd, "version: \"0.1\"\nscripts:\n  # keep me\n  shell: echo hi\n")
+
+	app, out, _ := e2eApp(t, cwd)
+	app.PluginStore = &store
+	if err := app.Run([]string{"-e", "plugins", "install", "./godo-lines.wasm"}); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if !strings.Contains(out.String(), "runner:lines") {
+		t.Fatalf("install said:\n%s", out.String())
+	}
+
+	body, err := os.ReadFile(filepath.Join(cwd, "godo.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "# keep me") {
+		t.Fatalf("install rewrote the catalog and lost a comment:\n%s", body)
+	}
+
+	// The declared runner now works, with no hand-editing in between.
+	if err := os.WriteFile(filepath.Join(cwd, "godo.yaml"),
+		append(body, []byte("\n  # @runner lines\n  boot: |\n    touch made-it\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	app, _, _ = e2eApp(t, cwd)
+	app.PluginStore = &store
+	if err := app.Run([]string{"boot"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cwd, "made-it")); err != nil {
+		t.Fatalf("the installed plugin did not run: %v", err)
+	}
+}
+
+// A plugin that is not on this machine says so, and says what to run.
+//
+// The source is remote: a file sitting beside the catalog is already here, and
+// is loaded without ceremony.
+func TestE2E_pluginsNotInstalledSaysWhatToRun(t *testing.T) {
+	cwd := t.TempDir()
+	writeGodoYAML(t, cwd, "version: \"0.1\"\nengine:\n  plugins:\n"+
+		"    - source: https://example.test/lines.wasm\n"+
+		"      sha256: "+strings.Repeat("a", 64)+"\n"+
+		"      provides: [runner:lines]\n"+
+		"scripts:\n  # @runner lines\n  boot: |\n    touch one\n")
+	app, _, _ := e2eApp(t, cwd)
+	app.PluginStore = &pluginstore.Store{Dir: filepath.Join(t.TempDir(), "empty")}
+
+	err := app.Run([]string{"boot"})
+	if err == nil {
+		t.Fatal("ran a plugin that is not installed")
+	}
+	for _, want := range []string{"not installed", "godo -e plugins install"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("err=%v, missing %q", err, want)
+		}
+	}
+	if _, serr := os.Stat(filepath.Join(cwd, "one")); serr == nil {
+		t.Fatal("something ran anyway")
+	}
+}
+
+// A file beside the catalog needs no install — its digest is checked anyway.
+func TestE2E_localArtifactNeedsNoInstall(t *testing.T) {
+	cwd := pluginCatalog(t, true, "  # @runner lines\n  boot: |\n    touch one\n")
+	app, _, _ := e2eApp(t, cwd)
+	app.PluginStore = &pluginstore.Store{Dir: filepath.Join(t.TempDir(), "empty")}
+	if err := app.Run([]string{"boot"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cwd, "one")); err != nil {
+		t.Fatalf("did not run: %v", err)
+	}
+}
+
+func TestE2E_pluginsListsState(t *testing.T) {
+	cwd := pluginCatalog(t, true, "  # @runner lines\n  boot: |\n    touch one\n")
+	app, out, _ := e2eApp(t, cwd)
+	app.PluginStore = &pluginstore.Store{Dir: filepath.Join(t.TempDir(), "empty")}
+	if err := app.Run([]string{"-e", "plugins"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"runner:lines", "not installed", "godo -e plugins install"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing %q in:\n%s", want, out.String())
+		}
 	}
 }
