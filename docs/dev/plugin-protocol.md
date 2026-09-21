@@ -21,7 +21,7 @@ small: there is no memory-sharing ABI to get right, any language that targets
 WASI can write one, and a plugin can be tested as an ordinary program —
 
 ```bash
-echo '{"api":1,"mode":"preview","body":"echo hi","argv":{},"args":[]}' | ./plugin
+echo '{"api":1,"body":"echo hi","argv":{},"args":[]}' | ./plugin
 ```
 
 ## The sandbox
@@ -43,11 +43,20 @@ import socket       the module is not there
 |-------|-------|
 | `proc.exec` | the `exec` op |
 | `fs.mount` | the catalog's own directory, as the guest's root |
+| `fs.slink` | the `slink` op |
+| `fs.slink` | the `slink` op |
 | `time.wall` | the real clock instead of a frozen one |
 
 `fs.mount` is a bool, not a path: what gets mounted is the directory the
 `godo.yaml` lives in, never somewhere the file names. A catalog that chose its
 own mount point could ask for `/`, and the grant would mean nothing.
+
+`fs.slink` is not confined the same way. A relative path resolves against the
+catalog's directory, but it may leave it — a git worktree is created *beside* a
+repository, and linking into it is the use case. Confining it would also be
+theatre: `proc.exec` can run `ln -s` anywhere, so a `slink` narrower than
+`exec` protects nothing. The grant is the boundary; withhold it from a plugin
+you would not hand a shell.
 
 ## Request
 
@@ -81,9 +90,13 @@ unbuffered, so a plugin that spoke first would deadlock.
 | Op | Answered | Needs |
 |----|----------|-------|
 | `exec` | yes | `config.proc.exec` |
+| `out` | no | — |
+| `slink` | yes | `config.fs.slink` |
 
 ```json
 {"op":"exec","argv":["git","status"],"dir":"","capture":false}
+{"op":"out","text":"updated dependencies"}
+{"op":"slink","src":"bin/godo","dst":".bin/godo","force":false}
 ```
 
 ### Result
@@ -179,5 +192,6 @@ release archives.
 - **Size.** A Go plugin carries Go's runtime — the example is ~4.5 MB. TinyGo
   or a C-family language produces far smaller wasm.
 - **One instantiation per step.** Fine at godo's scale; it is not a server.
-- **`exec` only.** No spawn. Filesystem access is the mount, not an op.
-  `config` is shaped as sections so more can be added without moving anything.
+- **No spawn.** Filesystem access is limited to the mount and `slink` within
+  the catalog. `config` is shaped as sections so more can be added without
+  moving anything.

@@ -48,6 +48,14 @@ type Op struct {
 	Argv    []string `json:"argv,omitempty"`
 	Dir     string   `json:"dir,omitempty"`
 	Capture bool     `json:"capture,omitempty"`
+
+	// out
+	Text string `json:"text,omitempty"`
+
+	// slink
+	Src   string `json:"src,omitempty"`
+	Dst   string `json:"dst,omitempty"`
+	Force bool   `json:"force,omitempty"`
 }
 
 // Result is godo's answer to an op that needs one.
@@ -65,4 +73,8 @@ type Result struct {
 const (
 	// OpExec runs an argument vector and waits. Needs config proc.exec.
 	OpExec = "exec"
+	// OpOut writes a line to the host's stdout. Needs no capability.
+	OpOut = "out"
+	// OpSlink creates a symlink. Needs config fs.slink.
+	OpSlink = "slink"
 )

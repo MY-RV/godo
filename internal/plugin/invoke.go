@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/tetratelabs/wazero"
@@ -130,8 +131,17 @@ func (p *Plugin) serve(r io.Reader, w io.Writer, host Host) error {
 			return fmt.Errorf("plugin %s: unreadable op %q: %w", p.Source, line, err)
 		}
 		switch op.Op {
+		case OpOut:
+			if _, err := fmt.Fprintln(orStd(host.Stdout, os.Stdout), op.Text); err != nil {
+				return fmt.Errorf("plugin %s: %w", p.Source, err)
+			}
 		case OpExec:
 			res := p.execOp(op, host)
+			if err := enc.Encode(res); err != nil {
+				return fmt.Errorf("plugin %s: %w", p.Source, err)
+			}
+		case OpSlink:
+			res := p.slinkOp(op, host)
 			if err := enc.Encode(res); err != nil {
 				return fmt.Errorf("plugin %s: %w", p.Source, err)
 			}
@@ -176,6 +186,47 @@ func (p *Plugin) execOp(op Op, host Host) Result {
 	}
 	res.OK = res.Code == 0
 	return res
+}
+
+func (p *Plugin) slinkOp(op Op, host Host) Result {
+	if !p.granted("fs", "slink") {
+		return Result{Error: "not granted: fs.slink — enable it under engine.plugins[].config.fs.slink"}
+	}
+	// Paths resolve against the catalog's directory but are not confined to
+	// it. A worktree is created beside a repository, not inside it, and the
+	// link into it is the point. Confinement here would also be theatre:
+	// proc.exec can run "ln -s" anywhere, so a slink narrower than exec
+	// protects nothing. The grant is the boundary — withhold fs.slink from a
+	// plugin you would not hand a shell.
+	src := resolveAgainst(host.Dir, op.Src)
+	dst := resolveAgainst(host.Dir, op.Dst)
+
+	if _, err := os.Lstat(dst); err == nil {
+		if !op.Force {
+			return Result{Error: fmt.Sprintf("slink: dst exists: %s", op.Dst)}
+		}
+		if err := os.Remove(dst); err != nil {
+			return Result{Error: fmt.Sprintf("slink: remove dst: %v", err)}
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Result{Error: fmt.Sprintf("slink: dst: %v", err)}
+	}
+
+	// Windows support for os.Symlink is unverified on a real Windows host.
+	if err := os.Symlink(src, dst); err != nil {
+		return Result{Error: fmt.Sprintf("slink: %v", err)}
+	}
+	return Result{Code: 0, OK: true}
+}
+
+// resolveAgainst turns a plugin-supplied path into an absolute one.
+//
+// An absolute path is taken as given: a script that names /tmp means /tmp.
+func resolveAgainst(dir, path string) string {
+	if filepath.IsAbs(path) || dir == "" {
+		return path
+	}
+	return filepath.Join(dir, path)
 }
 
 func runAndCode(cmd *exec.Cmd, res *Result) int {

@@ -1,15 +1,15 @@
-package plugin_test
+package plugin
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/my-rv/godo/internal/plugin"
 )
 
 var (
@@ -59,15 +59,15 @@ func exampleWasm(t *testing.T) string {
 	return wasmPath
 }
 
-func load(t *testing.T, config map[string]any) (*plugin.Plugin, func()) {
+func load(t *testing.T, config map[string]any) (*Plugin, func()) {
 	t.Helper()
 	path := exampleWasm(t)
-	digest, err := plugin.Digest(path)
+	digest, err := Digest(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	rt := plugin.NewRuntime(ctx)
+	rt := NewRuntime(ctx)
 	p, err := rt.Load(ctx, path, digest, "", []string{"runner:lines"}, config)
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func load(t *testing.T, config map[string]any) (*plugin.Plugin, func()) {
 func TestLoad_refusesAWrongDigest(t *testing.T) {
 	path := exampleWasm(t)
 	ctx := context.Background()
-	rt := plugin.NewRuntime(ctx)
+	rt := NewRuntime(ctx)
 	defer rt.Close(ctx)
 
 	_, err := rt.Load(ctx, path, strings.Repeat("0", 64), "", nil, nil)
@@ -98,12 +98,12 @@ func TestLoad_refusesSomethingThatIsNotWasm(t *testing.T) {
 	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	digest, err := plugin.Digest(path)
+	digest, err := Digest(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	rt := plugin.NewRuntime(ctx)
+	rt := NewRuntime(ctx)
 	defer rt.Close(ctx)
 	if _, err := rt.Load(ctx, path, digest, "", nil, nil); err == nil {
 		t.Fatal("want a compile error")
@@ -115,10 +115,10 @@ func TestInvoke_execRunsWhenGranted(t *testing.T) {
 	p, done := load(t, map[string]any{"proc": map[string]any{"exec": true}})
 	defer done()
 
-	out, err := p.Invoke(context.Background(), plugin.Request{
+	out, err := p.Invoke(context.Background(), Request{
 		Body: "touch marker\ntouch ${NAME}",
 		Argv: map[string]string{"NAME": "second"},
-	}, plugin.Host{Dir: dir})
+	}, Host{Dir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,9 +138,9 @@ func TestInvoke_execRefusedWhenNotGranted(t *testing.T) {
 	p, done := load(t, nil)
 	defer done()
 
-	out, err := p.Invoke(context.Background(), plugin.Request{
+	out, err := p.Invoke(context.Background(), Request{
 		Body: "touch marker",
-	}, plugin.Host{Dir: dir})
+	}, Host{Dir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestInvoke_configMustSayTrue(t *testing.T) {
 		{"fs": map[string]any{"exec": true}},
 	} {
 		p, done := load(t, cfg)
-		out, err := p.Invoke(context.Background(), plugin.Request{Body: "touch marker"}, plugin.Host{Dir: dir})
+		out, err := p.Invoke(context.Background(), Request{Body: "touch marker"}, Host{Dir: dir})
 		done()
 		if err != nil {
 			t.Fatalf("%v: %v", cfg, err)
@@ -180,10 +180,10 @@ func TestInvoke_exitCodeIsTheChilds(t *testing.T) {
 	p, done := load(t, map[string]any{"proc": map[string]any{"exec": true}})
 	defer done()
 
-	out, err := p.Invoke(context.Background(), plugin.Request{
+	out, err := p.Invoke(context.Background(), Request{
 		Body: "sh -c ${SCRIPT}\ntouch should-not-exist",
 		Argv: map[string]string{"SCRIPT": "exit 42"},
-	}, plugin.Host{Dir: t.TempDir()})
+	}, Host{Dir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,10 +198,10 @@ func TestInvoke_optionalLineDoesNotStopTheBody(t *testing.T) {
 	p, done := load(t, map[string]any{"proc": map[string]any{"exec": true}})
 	defer done()
 
-	out, err := p.Invoke(context.Background(), plugin.Request{
+	out, err := p.Invoke(context.Background(), Request{
 		Body: "?sh -c ${SCRIPT}\ntouch after",
 		Argv: map[string]string{"SCRIPT": "exit 3"},
-	}, plugin.Host{Dir: dir})
+	}, Host{Dir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestInvoke_noFilesystemUnlessGranted(t *testing.T) {
 
 	// "ls" here runs on the host through exec, which is granted; what is not
 	// granted is the guest seeing the directory itself.
-	out, err := p.Invoke(context.Background(), plugin.Request{Body: "true"}, plugin.Host{Dir: dir})
+	out, err := p.Invoke(context.Background(), Request{Body: "true"}, Host{Dir: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,4 +266,151 @@ func TestInvoke_mountIsGatedAndScoped(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestServe_outWritesWithoutAnswer(t *testing.T) {
+	var stdout, answers bytes.Buffer
+	p := &Plugin{}
+	if err := p.serve(strings.NewReader(`{"op":"out","text":"hello"}`+"\n"), &answers, Host{Stdout: &stdout}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stdout.String(); got != "hello\n" {
+		t.Fatalf("stdout=%q", got)
+	}
+	if got := answers.String(); got != "" {
+		t.Fatalf("out unexpectedly received an answer: %q", got)
+	}
+}
+
+func TestServe_slinkCreatesLinkWhenGranted(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "source"), []byte("linked"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &Plugin{Config: map[string]any{"fs": map[string]any{"slink": true}}}
+	res := serveOp(t, p, Host{Dir: dir}, Op{Op: OpSlink, Src: "source", Dst: "link"})
+	if !res.OK || res.Code != 0 || res.Error != "" {
+		t.Fatalf("result=%+v", res)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "link"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); got != "linked" {
+		t.Fatalf("linked content=%q", got)
+	}
+}
+
+func TestServe_slinkRefusesWithoutGrant(t *testing.T) {
+	dir := t.TempDir()
+	p := &Plugin{}
+	res := serveOp(t, p, Host{Dir: dir}, Op{Op: OpSlink, Src: "source", Dst: "link"})
+	const want = "not granted: fs.slink — enable it under engine.plugins[].config.fs.slink"
+	if res.Error != want {
+		t.Fatalf("error=%q, want %q", res.Error, want)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "link")); !os.IsNotExist(err) {
+		t.Fatalf("ungranted slink created dst: %v", err)
+	}
+}
+
+// The catalog's neighbour is reachable on purpose: a git worktree is created
+// beside a repository, and linking .env into it is the whole use case.
+//
+// Confinement here would also be theatre — proc.exec can run "ln -s" anywhere,
+// so a slink narrower than exec protects nothing. The grant is the boundary.
+func TestServe_slinkReachesBesideTheCatalog(t *testing.T) {
+	root := t.TempDir()
+	catalog := filepath.Join(root, "repo")
+	neighbour := filepath.Join(root, "repo-wt")
+	for _, d := range []string{catalog, neighbour} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(catalog, ".env"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &Plugin{Config: map[string]any{"fs": map[string]any{"slink": true}}}
+
+	res := serveOp(t, p, Host{Dir: catalog}, Op{Op: OpSlink, Src: ".env", Dst: "../repo-wt/.env"})
+	if res.Error != "" {
+		t.Fatalf("error=%q", res.Error)
+	}
+	if !res.OK {
+		t.Fatal("slink reported failure")
+	}
+	if _, err := os.Lstat(filepath.Join(neighbour, ".env")); err != nil {
+		t.Fatalf("the link was not created: %v", err)
+	}
+}
+
+// An absolute path is taken as given rather than reinterpreted.
+func TestServe_slinkAcceptsAnAbsolutePath(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "source")
+	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &Plugin{Config: map[string]any{"fs": map[string]any{"slink": true}}}
+
+	res := serveOp(t, p, Host{Dir: dir}, Op{Op: OpSlink, Src: target, Dst: "link"})
+	if res.Error != "" {
+		t.Fatalf("error=%q", res.Error)
+	}
+	got, err := os.Readlink(filepath.Join(dir, "link"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != target {
+		t.Fatalf("link points at %q, want %q", got, target)
+	}
+}
+
+func TestServe_slinkForceReplacesExistingDestination(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "source"), []byte("replacement"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(dir, "link")
+	if err := os.Symlink("missing", dst); err != nil {
+		t.Fatal(err)
+	}
+	p := &Plugin{Config: map[string]any{"fs": map[string]any{"slink": true}}}
+	res := serveOp(t, p, Host{Dir: dir}, Op{Op: OpSlink, Src: "source", Dst: "link"})
+	if res.Error == "" {
+		t.Fatal("force=false replaced an existing destination")
+	}
+	if target, err := os.Readlink(dst); err != nil || target != "missing" {
+		t.Fatalf("force=false changed destination: target=%q err=%v", target, err)
+	}
+
+	res = serveOp(t, p, Host{Dir: dir}, Op{Op: OpSlink, Src: "source", Dst: "link", Force: true})
+	if !res.OK || res.Code != 0 || res.Error != "" {
+		t.Fatalf("result=%+v", res)
+	}
+	data, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); got != "replacement" {
+		t.Fatalf("replacement content=%q", got)
+	}
+}
+
+func serveOp(t *testing.T, p *Plugin, host Host, op Op) Result {
+	t.Helper()
+	line, err := json.Marshal(op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var answers bytes.Buffer
+	if err := p.serve(bytes.NewReader(append(line, '\n')), &answers, host); err != nil {
+		t.Fatal(err)
+	}
+	var res Result
+	if err := json.NewDecoder(&answers).Decode(&res); err != nil {
+		t.Fatalf("decode result %q: %v", answers.String(), err)
+	}
+	return res
 }
