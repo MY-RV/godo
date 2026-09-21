@@ -268,6 +268,35 @@ func (p *Plugin) MountedDir(catalogDir string) string {
 	return catalogDir
 }
 
+// grantNote lists what this plugin was granted, for a failure message.
+//
+// A script inside a shut sandbox fails in the language's own words — a missing
+// file is ENOENT, not "you did not grant fs.mount" — and the connection is
+// invisible from inside. This does not claim to know why something failed; it
+// puts the grants next to the failure so the reader can see what was and was
+// not available.
+func (p *Plugin) grantNote() string {
+	var have []string
+	for _, c := range []struct{ section, key string }{
+		{"proc", "exec"},
+		{"fs", "mount"},
+		{"fs", "slink"},
+		{"time", "wall"},
+	} {
+		if p.granted(c.section, c.key) {
+			have = append(have, c.section+"."+c.key)
+		}
+	}
+	if len(have) == 0 {
+		return "\n  granted: nothing — see engine.plugins[].config"
+	}
+	note := "\n  granted: " + strings.Join(have, ", ")
+	if !p.granted("fs", "mount") {
+		note += "\n  no filesystem: add fs.mount under its config if the script reads or writes files"
+	}
+	return note
+}
+
 // granted reports whether config grants section.key.
 //
 // Deny by default: an absent section, an absent key, or anything that is not
