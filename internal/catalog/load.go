@@ -3,6 +3,7 @@ package catalog
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -99,7 +100,7 @@ func Parse(data []byte, path string, dialects ...*DialectRegistry) (*Catalog, er
 	for i := 0; i < len(scriptsNode.Content); i += 2 {
 		keyNode := scriptsNode.Content[i]
 		valNode := scriptsNode.Content[i+1]
-		script, err := scriptFromNodes(keyNode, valNode, cat.Dialect, reg)
+		script, err := scriptFromNodes(keyNode, valNode, cat.Dialect, reg, path)
 		if err != nil {
 			return nil, err
 		}
@@ -112,7 +113,7 @@ func Parse(data []byte, path string, dialects ...*DialectRegistry) (*Catalog, er
 	return cat, nil
 }
 
-func scriptFromNodes(key, val *yaml.Node, fileDialect DialectName, reg *DialectRegistry) (Script, error) {
+func scriptFromNodes(key, val *yaml.Node, fileDialect DialectName, reg *DialectRegistry, path string) (Script, error) {
 	s := Script{Key: key.Value}
 	dec, err := parseDecorators(key.HeadComment)
 	if err != nil {
@@ -133,6 +134,10 @@ func scriptFromNodes(key, val *yaml.Node, fileDialect DialectName, reg *DialectR
 	}
 	if len(cmds) == 0 {
 		return Script{}, fmt.Errorf("%w: script %q: empty command list", ErrInvalidCatalog, s.Key)
+	}
+	cmds, err = resolveIncludes(cmds, filepath.Dir(path), s.Key)
+	if err != nil {
+		return Script{}, err
 	}
 	s.Commands = cmds
 

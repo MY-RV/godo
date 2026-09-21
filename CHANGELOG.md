@@ -45,6 +45,10 @@ Breaking. The shell that runs your scripts changed.
   they are parsed and validated so the shape is settled, and a script asking
   for a runner a plugin provides fails by naming that plugin instead of reading
   as a typo.
+- **`${godo:file(path)}` as a whole script value** puts the body in a file, so
+  a Python or shell script gets an editor that understands it. Inclusion rather
+  than expansion: it happens when the body is read, works for every runner, and
+  leaves `${godo:…}` inside the file alone.
 - **`godo -e plugins install <source>`** fetches an artifact, computes its
   digest, stores it under `<user cache>/godo/plugins`, and writes the entry into
   `godo.yaml` — preserving the comments, blank lines and block scalars around

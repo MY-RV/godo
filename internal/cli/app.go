@@ -479,7 +479,11 @@ func (a *App) list(eng *catalog.Engine, tokens []string) error {
 	}
 	fmt.Fprintf(a.Stdout, "%s:\n", s.Key)
 	for _, c := range s.Commands {
-		fmt.Fprintf(a.Stdout, "  %s\n", c)
+		// A body can be many lines — a block scalar, or a file included with
+		// ${godo:file(…)} — and every one of them is part of this script.
+		for _, line := range strings.Split(strings.TrimRight(c, "\n"), "\n") {
+			fmt.Fprintf(a.Stdout, "  %s\n", line)
+		}
 	}
 	return nil
 }

@@ -291,6 +291,31 @@ text is trusted — it is repo code. Values substituted into it are quoted, so
 arguments and captures are data, not shell syntax; `${godo:…:raw}` waives that for one
 placeholder and puts the trust decision back on the catalog author.
 
+## Bodies in a file
+
+A script's value may be a single `${godo:file(path)}`, and the body is then the
+contents of that file:
+
+```yaml
+scripts:
+  # @runner micropy
+  worktree create ${BRANCH} ${DIR}: ${godo:file(./worktree.godo.py)}
+```
+
+It uses the `${godo:…}` namespace because that namespace already exists and is
+already godo's alone — there is nothing for it to collide with.
+
+It is **inclusion, not expansion**: it happens when the body is read rather
+than when it is rendered. So it works for every runner, including one whose
+bodies are never expanded, and `${godo:…}` *inside* the included file is left
+alone. That text belongs to whatever runs it.
+
+- The path is relative to the `godo.yaml`, not to the caller's directory: a
+  script says where its body lives, and that does not move.
+- It must be the **whole value**. Splicing a file into part of a line would
+  paste newlines into a command; `echo ${godo:file(m.txt)}` is an error.
+- A `string[]` may mix included and inline entries.
+
 ## Script decorators (JSDoc style)
 
 YAML comment block **immediately above** the script key. Apply to scripts only.
