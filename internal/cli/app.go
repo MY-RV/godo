@@ -60,7 +60,7 @@ func (a *App) Run(args []string) error {
 		return nil
 	}
 	if mode == modeVersion {
-		fmt.Fprintln(a.Stdout, godo.Version)
+		fmt.Fprintln(a.Stdout, godo.Release())
 		return nil
 	}
 	if mode == modeRunners {
@@ -85,7 +85,7 @@ func (a *App) Run(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := requireEngineVersion(cat, godo.Version); err != nil {
+	if err := requireEngineVersion(cat, godo.Release()); err != nil {
 		return err
 	}
 	root := filepath.Dir(path)
@@ -182,11 +182,11 @@ func (a *App) runUpdate(checkOnly bool) error {
 	if err != nil {
 		return err
 	}
-	newer, err := update.Newer(godo.Version, tag)
+	newer, err := update.Newer(godo.Release(), tag)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(a.Stdout, "current: %s\nlatest:  %s\n", godo.Version, tag)
+	fmt.Fprintf(a.Stdout, "current: %s\nlatest:  %s\n", godo.Release(), tag)
 	if !newer {
 		fmt.Fprintln(a.Stdout, "already up to date")
 		return nil

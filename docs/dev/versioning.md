@@ -18,6 +18,15 @@ Module: `github.com/my-rv/godo`
 
 Do not confuse them.
 
+Read the first one through `godo.Release()`, never `godo.Version` directly.
+`go install …/cmd/godo@vX.Y.Z` links none of our flags, so `Version` stays at
+its `0.1.0-dev` default; `Release()` takes the tag from Go's build info when it
+finds one there. A build from a working tree keeps saying `0.1.0-dev` — Go
+describes it with a pseudo-version, and no one released that.
+
+`engine.version` is compared against `Release()`, so a binary installed at a
+tag is judged by the tag.
+
 ## Stability today (v0.1)
 
 | Surface | Stability |

@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.3.0-preview.1] — 2026-09-20
+
+**A preview.** It is a GitHub pre-release, so `godo -e update` does not offer
+it and neither Homebrew nor Scoop will hand it to you — download it from
+[Releases](https://github.com/MY-RV/godo/releases), or
+`go install github.com/my-rv/godo/cmd/godo@v0.3.0-preview.1`. On a preview
+binary `godo -e update check` reports no update, because the newest *release*
+is still 0.2.0.
+
+It is a preview because plugin loading is new and has been run on macOS and
+Linux only. Everything below is what 0.3.0 will promise; the preview is
+where it gets found out.
+
 Breaking. The shell that runs your scripts changed.
 
 ### Changed
@@ -41,10 +54,19 @@ Breaking. The shell that runs your scripts changed.
   (minimum binary, enforced before anything runs), `dialect`, `runner`, and
   `plugins`. `engine.plugins` takes `source`, a **required** `sha256`,
   `provides: [runner:name]`, and an optional `config` that is entirely the
-  plugin's — godo carries it without reading it. Nothing loads plugins yet;
-  they are parsed and validated so the shape is settled, and a script asking
-  for a runner a plugin provides fails by naming that plugin instead of reading
-  as a typo.
+  plugin's — godo carries it across and reads only `fs.mount`, which says which
+  directories the sandbox can see.
+- **Plugins run.** A plugin is a WebAssembly (WASI) program; godo runs it with
+  [wazero](https://wazero.io), which is pure Go, so the binary you already have
+  is the whole runtime — no cgo, no toolchain, nothing to install. The artifact
+  is checked against its `sha256` **before** it is compiled, so what runs is
+  what was reviewed. A script picks one by name (`# @runner micropy`) and godo
+  hands it the body; the plugin asks godo back for what it cannot do itself,
+  over four ops — `exec`, `out`, `slink` and `fetch`. Its only view of the disk
+  is the directories `config.fs.mount` names, the catalog's own directory by
+  default. `--preview` prints the body and never starts the plugin.
+  The first one is [godo-micropy](https://github.com/MY-RV/godo-micropy):
+  MicroPython, so a script can be Python on every machine godo runs on.
 - **`${godo:file(path)}` as a whole script value** puts the body in a file, so
   a Python or shell script gets an editor that understands it. Inclusion rather
   than expansion: it happens when the body is read, works for every runner, and
@@ -69,6 +91,13 @@ Breaking. The shell that runs your scripts changed.
   `DefaultRunners`, `EffectiveRunner`, `WithRunners`, `ErrUnknownRunner`.
 
 ### Fixed
+- **A `go install …@v0.3.0` binary reports the version it was installed at.**
+  Nothing links our `-ldflags` on that path, so the version stayed at its
+  `0.1.0-dev` default — cosmetic until `engine.version` arrived, and then
+  enough to make a catalog refuse a binary that actually satisfied it. The tag
+  now comes from Go's build info. A build from a working tree still says
+  `0.1.0-dev`: Go describes it with a pseudo-version, and that is not a release
+  anyone made.
 - A value shaped like `--flag=…` is quoted from the `=` onward, so `--preview`
   shows `git commit --am='two words'` instead of `git commit '--am=two words'`,
   which read as though the flag name were part of the message. Identical single
@@ -142,12 +171,6 @@ Full rules in [docs/contract.md](./docs/contract.md).
 - Contract e2e tests and expand fuzz.
 - Product docs (overview, getting started, guides, reference, distribution, roadmap).
 - Origin story (EN/ES), SECURITY.md, CONTRIBUTING, GitHub issue/PR templates, CODEOWNERS.
-
-### Fixed
-- A value shaped like `--flag=…` is quoted from the `=` onward, so `--preview`
-  shows `git commit --am='two words'` instead of `git commit '--am=two words'`,
-  which read as though the flag name were part of the message. Identical single
-  argument to the shell — rendering only.
 
 ### Notes
 - Product display name: **GoDo**; identifiers remain lowercase `godo`.
