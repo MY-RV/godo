@@ -1,6 +1,8 @@
 package expand_test
 
 import (
+	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -199,5 +201,52 @@ func TestExpandInvocation_unknownCaptureFailsClosed(t *testing.T) {
 	_, err := expand.ExpandInvocation("lint ${NOPE}", map[string]string{})
 	if err == nil || !strings.Contains(err.Error(), "unknown capture") {
 		t.Fatalf("%v", err)
+	}
+}
+
+// --- flag=value rendering ---------------------------------------------------
+
+// A shell hands godo "--am=two words" whole, so quoting it whole would read as
+// though the flag name were part of the message. Quoting only the value is the
+// same single argument and looks like the command a person would type.
+func TestQuote_flagAssignmentQuotesOnlyTheValue(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"--am=two words", "--am='two words'"},
+		{"-m=two words", "-m='two words'"},
+		{"--pretty-format=a b", "--pretty-format='a b'"},
+		{"--am=it's", `--am='it'\''s'`},
+		// No space, nothing to quote.
+		{"--am=plain", "--am=plain"},
+		// Not a flag: quoted whole.
+		{"am=two words", "'am=two words'"},
+		{"two words", "'two words'"},
+		{"--=two words", "'--=two words'"},
+		{"-=a b", "'-=a b'"},
+		// Only the first "=" splits; the rest is value.
+		{"--x=a=b c", "--x='a=b c'"},
+	}
+	for _, tc := range cases {
+		if runtime.GOOS == "windows" {
+			t.Skip("posix quoting")
+		}
+		if got := expand.Quote(tc.in); got != tc.want {
+			t.Fatalf("Quote(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// The rendering must not change what the shell actually receives.
+func TestQuote_flagAssignmentIsTheSameSingleArgument(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("posix shells")
+	}
+	for _, v := range []string{"--am=two words", "--am=it's", "--x=a=b c", "--am=;rm -rf /"} {
+		out, err := exec.Command("/bin/sh", "-c", "printf '[%s]' "+expand.Quote(v)).Output()
+		if err != nil {
+			t.Fatalf("%q: %v", v, err)
+		}
+		if want := "[" + v + "]"; string(out) != want {
+			t.Fatalf("%q reached the shell as %s, want %s", v, out, want)
+		}
 	}
 }
