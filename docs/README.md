@@ -25,6 +25,7 @@ One topic per file (copy-paste examples):
 | [Preview and ls](./guide/preview-and-ls.md) | `--preview`, `--ls` |
 | [Package dialect](./guide/package-dialect.md) | Exact names (default) |
 | [Matcher dialect](./guide/matcher-dialect.md) | Pattern keys + captures |
+| [Runners](./guide/runners.md) | Which shell runs your line; `runner:` / `# @runner` |
 | [Deps](./guide/deps.md) | `# @deps` |
 | [Placeholders](./guide/placeholders.md) | `${…}` / `${godo:args…}` |
 | [Working directory](./guide/working-directory.md) | Catalog root, walk-up |

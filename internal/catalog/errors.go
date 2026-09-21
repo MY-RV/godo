@@ -13,6 +13,7 @@ var (
 	ErrDependencyCycle = errors.New("dependency cycle")
 	ErrInvalidCatalog  = errors.New("invalid catalog")
 	ErrInvalidCapture  = errors.New("invalid capture name")
+	ErrUnknownRunner   = errors.New("unknown runner")
 )
 
 // ExitError carries a process exit code from a failed command.

@@ -392,3 +392,294 @@ func TestEngine_argsAreQuotedIntoTheShellLine(t *testing.T) {
 		t.Fatalf("%q", ran)
 	}
 }
+
+// --- runner axis ------------------------------------------------------------
+
+// An unset runner stays unset and means "the Runner this engine was given",
+// so an embedder's injected runner keeps working without naming anything.
+func TestParse_unsetRunnerMeansTheInjectedOne(t *testing.T) {
+	cat, err := catalog.Parse([]byte("version: \"0.1\"\nscripts:\n  t: echo ok\n"), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cat.Runner != "" {
+		t.Fatalf("file runner=%q, want empty", cat.Runner)
+	}
+	if got := catalog.EffectiveRunner(cat.Scripts[0], cat.Runner); got != "" {
+		t.Fatalf("effective=%q, want empty", got)
+	}
+	var ran []string
+	eng := catalog.NewEngine(cat, runnerFunc(func(c string) error { ran = append(ran, c); return nil }))
+	if err := eng.Run([]string{"t"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(ran) != 1 || ran[0] != "echo ok" {
+		t.Fatalf("ran=%q", ran)
+	}
+}
+
+func TestParse_fileRunnerAndDecoratorOverride(t *testing.T) {
+	src := "version: \"0.1\"\nengine:\n  runner: micropy\nscripts:\n" +
+		"  inherits: echo a\n" +
+		"  # @runner bash\n" +
+		"  overrides: echo b\n"
+	cat, err := catalog.Parse([]byte(src), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cat.Runner != "micropy" {
+		t.Fatalf("file runner=%q", cat.Runner)
+	}
+	if got := catalog.EffectiveRunner(cat.Scripts[0], cat.Runner); got != "micropy" {
+		t.Fatalf("inherits=%q", got)
+	}
+	if got := catalog.EffectiveRunner(cat.Scripts[1], cat.Runner); got != "bash" {
+		t.Fatalf("overrides=%q", got)
+	}
+}
+
+func TestParse_runnerDecoratorRequiresName(t *testing.T) {
+	src := "version: \"0.1\"\nscripts:\n  # @runner\n  t: echo ok\n"
+	_, err := catalog.Parse([]byte(src), "x")
+	if err == nil || !errors.Is(err, catalog.ErrInvalidCatalog) {
+		t.Fatalf("err=%v", err)
+	}
+	if !strings.Contains(err.Error(), "@runner requires a name") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// An older binary has no @runner, and its unknown-decorator rejection is what
+// stops a body meant for another runner from reaching the host shell.
+func TestParse_unknownDecoratorStillRejected(t *testing.T) {
+	src := "version: \"0.1\"\nscripts:\n  # @executor exec\n  t: echo ok\n"
+	_, err := catalog.Parse([]byte(src), "x")
+	if err == nil || !strings.Contains(err.Error(), "unknown decorator @executor") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestBuildPlan_unknownRunnerFailsClosed(t *testing.T) {
+	src := "version: \"0.1\"\nscripts:\n  # @runner nope\n  t: echo ok\n"
+	cat, err := catalog.Parse([]byte(src), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng := catalog.NewEngine(cat, runnerFunc(func(string) error { return nil }))
+	if _, err := eng.BuildPlan([]string{"t"}); !errors.Is(err, catalog.ErrUnknownRunner) {
+		t.Fatalf("err=%v", err)
+	}
+	// Nothing must execute, so --preview has to fail the same way.
+	if _, err := eng.PreviewLines([]string{"t"}); !errors.Is(err, catalog.ErrUnknownRunner) {
+		t.Fatalf("preview err=%v", err)
+	}
+}
+
+func TestRun_dispatchesPerStepRunner(t *testing.T) {
+	src := "version: \"0.1\"\nscripts:\n" +
+		"  # @runner other\n" +
+		"  dep: echo dep\n" +
+		"  # @deps dep\n" +
+		"  body: echo body\n"
+	cat, err := catalog.Parse([]byte(src), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shell, other []string
+	reg := catalog.NewRunnerRegistry()
+	if err := reg.Register("other", runnerFunc(func(c string) error {
+		other = append(other, c)
+		return nil
+	})); err != nil {
+		t.Fatal(err)
+	}
+	eng := catalog.NewEngine(cat, runnerFunc(func(c string) error {
+		shell = append(shell, c)
+		return nil
+	}), catalog.WithRunners(reg))
+
+	if err := eng.Run([]string{"body"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(other) != 1 || other[0] != "echo dep" {
+		t.Fatalf("other=%v", other)
+	}
+	if len(shell) != 1 || shell[0] != "echo body" {
+		t.Fatalf("shell=%v", shell)
+	}
+}
+
+func TestBuildPlan_stepsRecordTheirRunner(t *testing.T) {
+	src := "version: \"0.1\"\nscripts:\n" +
+		"  # @runner other\n" +
+		"  dep: echo dep\n" +
+		"  # @deps dep\n" +
+		"  body: echo body\n"
+	cat, err := catalog.Parse([]byte(src), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := catalog.NewRunnerRegistry()
+	_ = reg.Register("other", runnerFunc(func(string) error { return nil }))
+	eng := catalog.NewEngine(cat, nil, catalog.WithRunners(reg))
+
+	plan, err := eng.BuildPlan([]string{"body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Steps) != 2 {
+		t.Fatalf("steps=%+v", plan.Steps)
+	}
+	// The dep named one; the body named none, so it is the injected default.
+	if plan.Steps[0].Runner != "other" || plan.Steps[1].Runner != "" {
+		t.Fatalf("runners=%q %q", plan.Steps[0].Runner, plan.Steps[1].Runner)
+	}
+}
+
+// A named runner comes from the registry, never from the injected default.
+func TestRun_namedRunnerBeatsTheInjectedDefault(t *testing.T) {
+	cat, err := catalog.Parse([]byte("version: \"0.1\"\nengine:\n  runner: inherit\nscripts:\n  t: echo ok\n"), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var injected, registered int
+	reg := catalog.NewRunnerRegistry()
+	_ = reg.Register(catalog.RunnerInherit, runnerFunc(func(string) error { registered++; return nil }))
+	eng := catalog.NewEngine(cat, runnerFunc(func(string) error { injected++; return nil }), catalog.WithRunners(reg))
+	if err := eng.Run([]string{"t"}); err != nil {
+		t.Fatal(err)
+	}
+	if registered != 1 || injected != 0 {
+		t.Fatalf("registered=%d injected=%d", registered, injected)
+	}
+}
+
+func TestRun_nilShellRunnerStillErrors(t *testing.T) {
+	cat, err := catalog.Parse([]byte("version: \"0.1\"\nscripts:\n  t: echo ok\n"), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.NewEngine(cat, nil).Run([]string{"t"}); err == nil ||
+		!strings.Contains(err.Error(), "nil runner") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestRunnerRegistry_rejectsEmptyNameAndNilRunner(t *testing.T) {
+	reg := catalog.NewRunnerRegistry()
+	if err := reg.Register("", runnerFunc(func(string) error { return nil })); err == nil {
+		t.Fatal("want error for empty name")
+	}
+	if err := reg.Register("x", nil); err == nil {
+		t.Fatal("want error for nil runner")
+	}
+	if _, err := reg.Lookup("x"); !errors.Is(err, catalog.ErrUnknownRunner) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// --- args are the runner's question -----------------------------------------
+
+// pluginRunner stands in for a plugin whose body is a program rather than a
+// shell template: no ${godo:args} to find, and it takes args regardless.
+type pluginRunner struct{ ran []string }
+
+func (r *pluginRunner) Run(c string) error        { r.ran = append(r.ran, c); return nil }
+func (r *pluginRunner) AcceptsArgs([]string) bool { return true }
+
+type strictRunner struct{}
+
+func (strictRunner) Run(string) error          { return nil }
+func (strictRunner) AcceptsArgs([]string) bool { return false }
+
+// Default policy, unchanged: no ${godo:args} in the body → extra tokens error.
+func TestBuildPlan_defaultPolicyStillRejectsUnexpectedArgs(t *testing.T) {
+	cat, err := catalog.Parse([]byte("version: \"0.1\"\nscripts:\n  t: echo hi\n"), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng := catalog.NewEngine(cat, runnerFunc(func(string) error { return nil }))
+	_, err = eng.BuildPlan([]string{"t", "extra"})
+	if !errors.Is(err, catalog.ErrUnexpectedArgs) {
+		t.Fatalf("err=%v", err)
+	}
+	if !strings.Contains(err.Error(), "${godo:args}") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// A plugin body has no placeholder, and still has to be able to take args.
+func TestBuildPlan_argsAwareRunnerOverridesThePlaceholderPolicy(t *testing.T) {
+	src := "version: \"0.1\"\nscripts:\n  # @runner micropy\n  t: print(godo.args)\n"
+	cat, err := catalog.Parse([]byte(src), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := catalog.NewRunnerRegistry()
+	pr := &pluginRunner{}
+	if err := reg.Register("micropy", pr); err != nil {
+		t.Fatal(err)
+	}
+	eng := catalog.NewEngine(cat, nil, catalog.WithRunners(reg))
+	if err := eng.Run([]string{"t", "--flag", "a b"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(pr.ran) != 1 || pr.ran[0] != "print(godo.args)" {
+		t.Fatalf("ran=%q", pr.ran)
+	}
+}
+
+func TestBuildPlan_argsAwareRunnerCanRefuse(t *testing.T) {
+	src := "version: \"0.1\"\nscripts:\n  # @runner strict\n  t: echo ${godo:args}\n"
+	cat, err := catalog.Parse([]byte(src), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := catalog.NewRunnerRegistry()
+	_ = reg.Register("strict", strictRunner{})
+	eng := catalog.NewEngine(cat, nil, catalog.WithRunners(reg))
+	_, err = eng.BuildPlan([]string{"t", "extra"})
+	if !errors.Is(err, catalog.ErrUnexpectedArgs) {
+		t.Fatalf("err=%v", err)
+	}
+	if !strings.Contains(err.Error(), `runner "strict"`) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// Deps are matched on their own, so the check uses the dep's runner.
+func TestBuildPlan_depArgsUseTheDepRunner(t *testing.T) {
+	src := "version: \"0.1\"\ndialect: matcher\nscripts:\n" +
+		"  # @runner micropy\n" +
+		"  seed ${ENV}: print(${godo:argv[ENV]})\n" +
+		"  # @deps seed dev\n" +
+		"  boot: echo up\n"
+	cat, err := catalog.Parse([]byte(src), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := catalog.NewRunnerRegistry()
+	_ = reg.Register("micropy", &pluginRunner{})
+	eng := catalog.NewEngine(cat, runnerFunc(func(string) error { return nil }), catalog.WithRunners(reg))
+	plan, err := eng.BuildPlan([]string{"boot"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Steps) != 2 || plan.Steps[0].Runner != "micropy" {
+		t.Fatalf("steps=%+v", plan.Steps)
+	}
+}
+
+// An unknown runner is still caught before the args question is asked.
+func TestBuildPlan_unknownRunnerBeatsUnexpectedArgs(t *testing.T) {
+	src := "version: \"0.1\"\nscripts:\n  # @runner nope\n  t: echo hi\n"
+	cat, err := catalog.Parse([]byte(src), "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng := catalog.NewEngine(cat, runnerFunc(func(string) error { return nil }))
+	_, err = eng.BuildPlan([]string{"t", "extra"})
+	if !errors.Is(err, catalog.ErrUnknownRunner) {
+		t.Fatalf("err=%v", err)
+	}
+}

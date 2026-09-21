@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/my-rv/godo"
@@ -56,6 +58,9 @@ func (a *App) Run(args []string) error {
 		fmt.Fprintln(a.Stdout, godo.Version)
 		return nil
 	}
+	if mode == modeRunners {
+		return a.listRunners(a.nearestCatalog())
+	}
 	if mode == modeUpdate || mode == modeUpdateCheck {
 		return a.runUpdate(mode == modeUpdateCheck)
 	}
@@ -72,11 +77,32 @@ func (a *App) Run(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := requireEngineVersion(cat, godo.Version); err != nil {
+		return err
+	}
+	root := filepath.Dir(path)
+	// The default is the shell you are in. A catalog that names no runner gets
+	// this one, which is why godo stops running zsh users under sh.
 	runner := a.Runner
 	if runner == nil {
-		runner = execshell.Runner{Dir: filepath.Dir(path)}
+		runner = execshell.InheritRunner{Dir: root}
 	}
-	eng := catalog.NewEngine(cat, runner)
+	// Registered here rather than in internal/catalog: internal/execshell
+	// imports it, so the engine cannot hold it without an import cycle.
+	runners := catalog.NewRunnerRegistry()
+	if err := runners.Register(catalog.RunnerInherit, execshell.InheritRunner{Dir: root}); err != nil {
+		return err
+	}
+	// Any other name is a shell the catalog asked for by name. godo does not
+	// manage those — it proxies to whatever is on PATH.
+	runners.Resolve = func(name catalog.RunnerName) (catalog.Runner, error) {
+		r, err := execshell.NativeShell(string(name), root)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", catalog.ErrUnknownRunner, err)
+		}
+		return r, nil
+	}
+	eng := catalog.NewEngine(cat, runner, catalog.WithRunners(runners))
 
 	switch mode {
 	case modeList:
@@ -93,6 +119,27 @@ func (a *App) Run(args []string) error {
 	default:
 		return eng.Run(tokens)
 	}
+}
+
+// requireEngineVersion enforces engine.version against the running binary.
+//
+// A catalog using something a older godo does not have should say so once,
+// clearly, instead of failing later in whatever way that feature happens to
+// break. A -dev build compares by its numeric part, so working on godo itself
+// is not blocked by its own catalog.
+func requireEngineVersion(cat *catalog.Catalog, binary string) error {
+	want, ok := cat.Engine.Minimum()
+	if !ok {
+		return nil
+	}
+	older, err := update.Newer(binary, want)
+	if err != nil {
+		return fmt.Errorf("engine.version: %w", err)
+	}
+	if older {
+		return fmt.Errorf("%s needs godo %s or newer; this is %s (godo -e update)", cat.Path, want, binary)
+	}
+	return nil
 }
 
 func (a *App) runUpdate(checkOnly bool) error {
@@ -140,6 +187,84 @@ func (a *App) runUpdate(checkOnly bool) error {
 	return nil
 }
 
+// listRunners prints what a catalog may put in runner: / # @runner here.
+//
+// "here" is the point: the native shells are whatever this machine has, so the
+// list is a fact about the machine, not about godo.
+// nearestCatalog loads the catalog for -e runners, or nil.
+//
+// The listing is useful outside a repo, so a missing or broken catalog is not
+// an error here — it only means there is nothing extra to say about plugins.
+func (a *App) nearestCatalog() *catalog.Catalog {
+	cwd, err := a.cwd()
+	if err != nil {
+		return nil
+	}
+	path, err := catalog.FindFile(cwd)
+	if err != nil {
+		return nil
+	}
+	cat, err := catalog.LoadFile(path)
+	if err != nil {
+		return nil
+	}
+	return cat
+}
+
+func (a *App) listRunners(cat *catalog.Catalog) error {
+	fmt.Fprintf(a.Stdout, "%-10s %s  [default]\n", string(catalog.RunnerInherit), execshell.DetectShell())
+	fmt.Fprintln(a.Stdout)
+	fmt.Fprintln(a.Stdout, "shells found here:")
+	found := false
+	for _, name := range execshell.KnownShells() {
+		path, err := exec.LookPath(name)
+		if err != nil {
+			continue
+		}
+		found = true
+		fmt.Fprintf(a.Stdout, "  %-10s %s\n", name, path)
+	}
+	if !found {
+		fmt.Fprintln(a.Stdout, "  (none)")
+	}
+	if cat != nil {
+		a.printDeclaredPlugins(cat)
+	}
+	a.printShellCheck()
+	return nil
+}
+
+// printDeclaredPlugins names runners a catalog expects from plugins, so the
+// listing does not read as though those names simply do not exist.
+func (a *App) printDeclaredPlugins(cat *catalog.Catalog) {
+	if len(cat.Engine.Plugins) == 0 {
+		return
+	}
+	fmt.Fprintln(a.Stdout, "\ndeclared by this catalog (no plugin loader in this build):")
+	for _, p := range cat.Engine.Plugins {
+		fmt.Fprintf(a.Stdout, "  %-10s %s\n", strings.Join(p.Provides, " "), p.Source)
+	}
+}
+
+// printShellCheck tells the reader how to confirm which shell they are in.
+//
+// godo answers that from the parent process, which no command run inside a
+// shell can report — running one would only describe the shell godo just
+// started. So when the detected shell looks wrong, the check has to happen in
+// the reader's own terminal, and this says how.
+func (a *App) printShellCheck() {
+	fmt.Fprintln(a.Stdout, "\nNot the shell you expected? Run this in your terminal:")
+	if runtime.GOOS == "windows" {
+		fmt.Fprintln(a.Stdout, "  PowerShell   $PSVersionTable.PSVersion")
+		fmt.Fprintln(a.Stdout, "  cmd          echo %COMSPEC%")
+		fmt.Fprintln(a.Stdout, "\nThen: set GODO_SHELL=C:\\path\\to\\shell.exe")
+		return
+	}
+	fmt.Fprintln(a.Stdout, "  echo $0            (sh, bash, zsh, dash, ksh)")
+	fmt.Fprintln(a.Stdout, "  echo $version      (fish)")
+	fmt.Fprintln(a.Stdout, "\nThen: GODO_SHELL=/path/to/shell")
+}
+
 func (a *App) list(eng *catalog.Engine, tokens []string) error {
 	if len(tokens) == 0 {
 		for _, s := range eng.ListAll() {
@@ -161,6 +286,9 @@ func (a *App) list(eng *catalog.Engine, tokens []string) error {
 	}
 	if s.Dialect != "" {
 		fmt.Fprintf(a.Stdout, "@dialect %s\n", s.Dialect)
+	}
+	if s.Runner != "" {
+		fmt.Fprintf(a.Stdout, "@runner %s\n", s.Runner)
 	}
 	for _, d := range s.Deps {
 		fmt.Fprintf(a.Stdout, "@deps %s\n", d)
@@ -190,6 +318,7 @@ const (
 	modePreview
 	modeUpdate
 	modeUpdateCheck
+	modeRunners
 )
 
 // ParseFlags parses context flags before script tokens.
@@ -241,6 +370,11 @@ func parseEngineCommand(tokens []string) (mode mode, rest []string, err error) {
 			return 0, nil, fmt.Errorf("-e version: unexpected arguments %v", tokens[1:])
 		}
 		return modeVersion, nil, nil
+	case "runners":
+		if len(tokens) > 1 {
+			return 0, nil, fmt.Errorf("-e runners: unexpected arguments %v", tokens[1:])
+		}
+		return modeRunners, nil, nil
 	case "update":
 		switch {
 		case len(tokens) == 1:
@@ -276,10 +410,12 @@ Examples:
   godo test                 # script "test" from godo.yaml
   godo update               # script "update" if defined
   godo -e version           # binary version
+  godo -e runners           # runners usable on this machine
   godo -e update            # self-update from GitHub Releases
   godo -e update check      # check only
 
 File: godo.yaml (walk-up). Dialects: package | matcher.
+Runners: inherit (default) | a shell by name (see -e runners).
 Env: GODO_RELEASES_API overrides GitHub API base for update.`)
 }
 
@@ -289,6 +425,7 @@ func EngineUsage(w io.Writer) {
 
 Built-in commands (not godo.yaml scripts):
   version         print binary version
+  runners         list runners usable here
   update          download latest GitHub Release for this OS/arch
   update check    report whether an update is available
   help            this help

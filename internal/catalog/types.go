@@ -21,13 +21,16 @@ type Script struct {
 	Doc      string   // joined non-@ comment lines
 	Deps     []string // @deps / @dependencies entries (raw, before expand)
 	Dialect  string   // @dialect override; empty → file dialect
+	Runner   string   // @runner override; empty → file runner
 }
 
 // Catalog is a loaded godo.yaml.
 type Catalog struct {
 	Path    string
 	Version string
+	Engine  EngineSpec
 	Dialect DialectName
+	Runner  RunnerName
 	Scripts []Script // definition order
 }
 

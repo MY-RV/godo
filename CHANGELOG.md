@@ -2,11 +2,72 @@
 
 ## [Unreleased]
 
+Breaking. The shell that runs your scripts changed.
+
+### Changed
+- **`dialect` moved to `engine.dialect`.** A top-level `dialect:` keeps
+  working — it shipped in 0.1 and 0.2 — and `engine.dialect` wins if both are
+  present. `runner` only ever existed as `engine.runner`.
+- **The default runner is the shell you are already in**, not `sh -c` /
+  `cmd /C`. A zsh user gets zsh, a PowerShell user gets PowerShell. The shell
+  someone uses is their own business; godo proxying to a different one was a
+  choice that was not godo's to make.
+  *Consequence, and it is deliberate:* a catalog is read by the shell of
+  whoever runs it, so zsh syntax behaves differently for a teammate on bash.
+  godo is a proxy and promises neither cross-OS nor cross-shell. To pin one
+  shell for everyone, name it (`runner: sh`, `runner: bash`).
+  *Library:* an unset runner means the `Runner` injected into the engine, so
+  `NewEngine(cat, myRunner)` is unaffected.
+
+### Added
+- **Runner axis.** `{file}.runner` and `# @runner` say *how* a script's body
+  becomes a process, the way `dialect` says *which* script answers the tokens.
+  It exists so a plugin's body — which is not a shell line at all — has a way
+  to say so; see the [design note](./docs/dev/runners-and-plugins.md).
+- **`inherit`** (the default): the shell you are in. `GODO_SHELL` overrides
+  detection; otherwise `$SHELL` on Unix, and on Windows the parent process when
+  it is a shell, else `%ComSpec%`. Windows reads the parent because the
+  environment cannot answer — PowerShell sets `PSModulePath` and everything it
+  starts inherits it, so a `cmd.exe` opened from PowerShell would look like
+  PowerShell.
+- **A shell by name:** `# @runner sh` / `bash` / `zsh` / `dash` / `ksh` / `ash`
+  / `fish` / `nu` / `cmd` / `pwsh` / `powershell`. godo does not manage these —
+  it resolves the name on `PATH` and hands the line over. The name is logical,
+  never a path: `cmd`, not `cmd.exe`; `pwsh`, not `ps1`. A name outside the
+  list is refused rather than run, so `# @runner git` cannot quietly become
+  `git -c <line>`.
+- **`engine:` block** — every dial godo turns while reading and running a
+  catalog, kept apart from `scripts:`, which is the data. Holds `version`
+  (minimum binary, enforced before anything runs), `dialect`, `runner`, and
+  `plugins`. `engine.plugins` takes `source`, a **required** `sha256`,
+  `provides: [runner:name]`, and an optional `config` that is entirely the
+  plugin's — godo carries it without reading it. Nothing loads plugins yet;
+  they are parsed and validated so the shape is settled, and a script asking
+  for a runner a plugin provides fails by naming that plugin instead of reading
+  as a typo.
+- **`godo -e runners`** lists what is usable on the machine you are on, and how
+  to confirm which shell you are in when the detected one looks wrong.
+- `--ls <tokens>` prints `@runner` beside `@dialect`.
+- `ArgsAwareRunner`: whether a script takes the tokens left over after the
+  match is the runner's question. A shell keeps the `${godo:args…}` rule,
+  message included; a runner whose body is a program answers for itself.
+- Public `RunnerName`, `RunnerInherit`, `RunnerRegistry`, `NewRunnerRegistry`,
+  `DefaultRunners`, `EffectiveRunner`, `WithRunners`, `ErrUnknownRunner`.
+
 ### Fixed
 - A value shaped like `--flag=…` is quoted from the `=` onward, so `--preview`
   shows `git commit --am='two words'` instead of `git commit '--am=two words'`,
   which read as though the flag name were part of the message. Identical single
   argument to the shell — rendering only.
+
+### Notes
+- An unknown runner fails when the plan is built (`--preview` included), not at
+  load: a dialect must resolve before a script can be matched at all, a runner
+  only to execute. Nothing executes either way.
+- A shell is started non-interactively and without a profile, so you get your
+  shell's grammar, not your shell's setup — aliases and functions are not there.
+- The Windows detection cross-compiles and vets but is unverified on a real
+  Windows host.
 
 ## [0.2.0] — 2026-09-19
 
@@ -44,6 +105,12 @@ Full rules in [docs/contract.md](./docs/contract.md).
   body. Both existed only to rescue host environment variables from being read
   as captures.
 
+### Fixed
+- A value shaped like `--flag=…` is quoted from the `=` onward, so `--preview`
+  shows `git commit --am='two words'` instead of `git commit '--am=two words'`,
+  which read as though the flag name were part of the message. Identical single
+  argument to the shell — rendering only.
+
 ### Notes
 - The Windows quoting path is **untested**: CI runs Linux only, and the runner
   tests skip on Windows. `cmd.exe` also expands `%VAR%` before a command sees
@@ -61,6 +128,12 @@ Full rules in [docs/contract.md](./docs/contract.md).
 - Contract e2e tests and expand fuzz.
 - Product docs (overview, getting started, guides, reference, distribution, roadmap).
 - Origin story (EN/ES), SECURITY.md, CONTRIBUTING, GitHub issue/PR templates, CODEOWNERS.
+
+### Fixed
+- A value shaped like `--flag=…` is quoted from the `=` onward, so `--preview`
+  shows `git commit --am='two words'` instead of `git commit '--am=two words'`,
+  which read as though the flag name were part of the message. Identical single
+  argument to the shell — rendering only.
 
 ### Notes
 - Product display name: **GoDo**; identifiers remain lowercase `godo`.
