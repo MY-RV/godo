@@ -2,9 +2,20 @@
 
 ## [Unreleased]
 
-Found by running `v0.3.0-preview.1` on a real Windows host, which is what the
-preview was for. The roadmap said Windows shell detection was written from
-documentation and unverified; it was also wrong.
+## [0.3.0-preview.2] — 2026-09-21
+
+**A preview**, on the same terms as the one before it: a GitHub pre-release, so
+`godo -e update` does not offer it and neither Homebrew nor Scoop carries it.
+
+All of it was found by running `v0.3.0-preview.1` on a real Windows host, which
+is what the preview was for. The roadmap said Windows shell detection was
+written from documentation and unverified; it was also wrong, and so were two
+other things.
+
+Still unverified, and the reason this is preview.2 rather than 0.3.0: the
+junction syscall runs only on Windows. Its reparse buffer is built in portable
+code and tested field by field, but `DeviceIoControl` itself has been executed
+by nobody.
 
 ### Fixed
 - **Every PowerShell user on Windows was told they were in `cmd`.** Detection
