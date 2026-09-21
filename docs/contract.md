@@ -125,7 +125,7 @@ rest on a transport anyone on the path can rewrite.
 | `source` | Required. An `https://` URL, or a path relative to the `godo.yaml` |
 | `sha256` | **Required.** A plugin is third-party code that runs when someone types `godo test`; without a digest there is nothing to verify it is the code that was reviewed |
 | `provides` | Required. `"<kind>:<name>"` entries, kind being `runner` or `dialect`. Two plugins may not provide the same one |
-| `config` | Optional, and entirely the plugin's: its keys, its meaning, its defaults. godo carries it across without reading it |
+| `config` | Optional, and the plugin's: its keys, its meaning, its defaults. godo carries it across and reads only `fs.mount`, which says which directories the sandbox can see |
 
 A script asking for a runner a plugin provides fails by naming that plugin:
 

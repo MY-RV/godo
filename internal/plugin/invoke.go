@@ -51,9 +51,10 @@ func (p *Plugin) Invoke(ctx context.Context, req Request, host Host) (Outcome, e
 		stderr = os.Stderr
 	}
 
-	// The sandbox starts shut: no filesystem, no environment, no network, and
-	// a frozen clock. Nothing is disabled here — nothing is granted. What the
-	// catalog's config asks for is added back below, and only that.
+	// A wasm guest starts with nothing wired to the outside. The mounts below
+	// are what the catalog asks for; everything else a script might reach for
+	// — a network, a subprocess — has no syscall to reach through, whatever
+	// anyone configures.
 	cfg := wazero.NewModuleConfig().
 		WithStdin(inR).
 		WithStdout(outW).
@@ -67,9 +68,7 @@ func (p *Plugin) Invoke(ctx context.Context, req Request, host Host) (Outcome, e
 		}
 		cfg = cfg.WithFSConfig(fs)
 	}
-	if p.granted("time", "wall") {
-		cfg = cfg.WithSysWalltime().WithSysNanotime()
-	}
+	cfg = cfg.WithSysWalltime().WithSysNanotime()
 
 	runErr := make(chan error, 1)
 	go func() {
@@ -160,11 +159,8 @@ func (p *Plugin) serve(r io.Reader, w io.Writer, host Host) error {
 	return nil
 }
 
-// execOp runs an argument vector, if the catalog granted it.
+// execOp runs an argument vector.
 func (p *Plugin) execOp(op Op, host Host) Result {
-	if !p.granted("proc", "exec") {
-		return Result{Error: "not granted: proc.exec — enable it under engine.plugins[].config.proc.exec"}
-	}
 	if len(op.Argv) == 0 {
 		return Result{Error: "exec: empty argv"}
 	}
@@ -192,15 +188,9 @@ func (p *Plugin) execOp(op Op, host Host) Result {
 }
 
 func (p *Plugin) slinkOp(op Op, host Host) Result {
-	if !p.granted("fs", "slink") {
-		return Result{Error: "not granted: fs.slink — enable it under engine.plugins[].config.fs.slink"}
-	}
 	// Paths resolve against the catalog's directory but are not confined to
 	// it. A worktree is created beside a repository, not inside it, and the
-	// link into it is the point. Confinement here would also be theatre:
-	// proc.exec can run "ln -s" anywhere, so a slink narrower than exec
-	// protects nothing. The grant is the boundary — withhold fs.slink from a
-	// plugin you would not hand a shell.
+	// link into it is the point.
 	src := resolveAgainst(host.Dir, op.Src)
 	dst := resolveAgainst(host.Dir, op.Dst)
 
@@ -262,6 +252,13 @@ type Mount struct {
 
 // Mounts returns the directories config.fs.mount asks for.
 //
+// This is the one thing godo reads out of config, and it is configuration
+// rather than permission: a guest cannot mount anything itself, so somebody
+// has to say what it sees, and the catalog is the only one who knows. The
+// default is the directory the godo.yaml lives in — a script that cannot read
+// the repository it belongs to is not useful, and nothing is being defended
+// against by withholding it.
+//
 // Three shapes, because a catalog that only wants its own directory should not
 // have to say so twice:
 //
@@ -275,7 +272,10 @@ type Mount struct {
 func (p *Plugin) Mounts(catalogDir string) []Mount {
 	raw, ok := p.configValue("fs", "mount")
 	if !ok {
-		return nil
+		if catalogDir == "" {
+			return nil
+		}
+		return []Mount{{Host: catalogDir, Guest: "/"}}
 	}
 	resolve := func(host string) string {
 		if host == "" {
@@ -323,37 +323,6 @@ func (p *Plugin) Mounts(catalogDir string) []Mount {
 	return nil
 }
 
-// grantNote lists what this plugin was granted, for a failure message.
-//
-// A script inside a shut sandbox fails in the language's own words — a missing
-// file is ENOENT, not "you did not grant fs.mount" — and the connection is
-// invisible from inside. This does not claim to know why something failed; it
-// puts the grants next to the failure so the reader can join them.
-func (p *Plugin) grantNote(catalogDir string) string {
-	var have []string
-	if p.granted("proc", "exec") {
-		have = append(have, "proc.exec")
-	}
-	if p.granted("fs", "slink") {
-		have = append(have, "fs.slink")
-	}
-	if p.granted("time", "wall") {
-		have = append(have, "time.wall")
-	}
-	mounts := p.Mounts(catalogDir)
-	for _, m := range mounts {
-		have = append(have, "fs.mount "+m.Guest)
-	}
-	if len(have) == 0 {
-		return "\n  granted: nothing — see engine.plugins[].config"
-	}
-	note := "\n  granted: " + strings.Join(have, ", ")
-	if len(mounts) == 0 {
-		note += "\n  no filesystem: add fs.mount under its config if the script reads or writes files"
-	}
-	return note
-}
-
 // configValue reads config[section][key] without deciding what it means.
 func (p *Plugin) configValue(section, key string) (any, bool) {
 	raw, ok := p.Config[section]
@@ -366,25 +335,4 @@ func (p *Plugin) configValue(section, key string) (any, bool) {
 	}
 	v, ok := m[key]
 	return v, ok
-}
-
-// granted reports whether config grants section.key.
-//
-// Deny by default: an absent section, an absent key, or anything that is not
-// exactly true, is not granted.
-func (p *Plugin) granted(section, key string) bool {
-	raw, ok := p.Config[section]
-	if !ok {
-		return false
-	}
-	m, ok := raw.(map[string]any)
-	if !ok {
-		return false
-	}
-	v, ok := m[key]
-	if !ok {
-		return false
-	}
-	b, ok := v.(bool)
-	return ok && b
 }

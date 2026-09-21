@@ -10,9 +10,14 @@
 // written in any language that targets WASI, and it can be tested outside wasm
 // entirely — pipe it a request on stdin and read what it says.
 //
-// The sandbox is wazero's default: no filesystem, no network, no environment,
-// no clock beyond what is granted. A plugin reaches the outside world only by
-// asking godo, and godo only honours what the catalog's config grants.
+// A wasm guest has no filesystem, no network and no way to start a process of
+// its own, so a plugin reaches the outside world by asking godo. That is a
+// property of the platform, not a policy: godo performs what it is asked,
+// because the script doing the asking is the catalog's, and a catalog already
+// runs with the shell's full reach.
+//
+// What is pinned is which plugin, not what it may do — the sha256 in the
+// catalog. Where the artifact came from is the question worth answering.
 package plugin
 
 // APIVersion is the protocol this build speaks. A plugin that answers with a

@@ -48,7 +48,7 @@ func (r Runner) RunInvocation(inv catalog.Invocation) error {
 	if out.Code != 0 {
 		return &catalog.ExitError{
 			Code:    out.Code,
-			Message: fmt.Sprintf("script %q failed under runner %q%s", inv.Script, r.Name, r.Plugin.grantNote(r.Host.Dir)),
+			Message: fmt.Sprintf("script %q failed under runner %q", inv.Script, r.Name),
 		}
 	}
 	return nil

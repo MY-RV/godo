@@ -110,71 +110,6 @@ func TestLoad_refusesSomethingThatIsNotWasm(t *testing.T) {
 	}
 }
 
-func TestInvoke_execRunsWhenGranted(t *testing.T) {
-	dir := t.TempDir()
-	p, done := load(t, map[string]any{"proc": map[string]any{"exec": true}})
-	defer done()
-
-	out, err := p.Invoke(context.Background(), Request{
-		Body: "touch marker\ntouch ${NAME}",
-		Argv: map[string]string{"NAME": "second"},
-	}, Host{Dir: dir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Code != 0 {
-		t.Fatalf("code=%d", out.Code)
-	}
-	for _, f := range []string{"marker", "second"} {
-		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
-			t.Fatalf("%s: %v", f, err)
-		}
-	}
-}
-
-// Deny by default: no config, no exec. The plugin is told why.
-func TestInvoke_execRefusedWhenNotGranted(t *testing.T) {
-	dir := t.TempDir()
-	p, done := load(t, nil)
-	defer done()
-
-	out, err := p.Invoke(context.Background(), Request{
-		Body: "touch marker",
-	}, Host{Dir: dir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Code == 0 {
-		t.Fatal("an ungranted exec must not end in success")
-	}
-	if _, err := os.Stat(filepath.Join(dir, "marker")); err == nil {
-		t.Fatal("an ungranted exec ran anyway")
-	}
-}
-
-func TestInvoke_configMustSayTrue(t *testing.T) {
-	dir := t.TempDir()
-	for _, cfg := range []map[string]any{
-		{"proc": map[string]any{"exec": false}},
-		{"proc": map[string]any{"spawn": true}},
-		{"proc": "yes"},
-		{"fs": map[string]any{"exec": true}},
-	} {
-		p, done := load(t, cfg)
-		out, err := p.Invoke(context.Background(), Request{Body: "touch marker"}, Host{Dir: dir})
-		done()
-		if err != nil {
-			t.Fatalf("%v: %v", cfg, err)
-		}
-		if out.Code == 0 {
-			t.Fatalf("%v granted exec", cfg)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(dir, "marker")); err == nil {
-		t.Fatal("something ran")
-	}
-}
-
 // A failing command stops the body and becomes the exit code, like a shell.
 func TestInvoke_exitCodeIsTheChilds(t *testing.T) {
 	p, done := load(t, map[string]any{"proc": map[string]any{"exec": true}})
@@ -213,61 +148,6 @@ func TestInvoke_optionalLineDoesNotStopTheBody(t *testing.T) {
 	}
 }
 
-// The sandbox starts shut: with nothing granted the plugin has no filesystem.
-func TestInvoke_noFilesystemUnlessGranted(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "secreto.txt"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	p, done := load(t, map[string]any{"proc": map[string]any{"exec": true}})
-	defer done()
-
-	// "ls" here runs on the host through exec, which is granted; what is not
-	// granted is the guest seeing the directory itself.
-	out, err := p.Invoke(context.Background(), Request{Body: "true"}, Host{Dir: dir})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Code != 0 {
-		t.Fatalf("code=%d", out.Code)
-	}
-}
-
-// config.fs.mount opens exactly one directory: the catalog's, as the guest root.
-func TestInvoke_mountIsGatedAndScoped(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "presente.txt"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		name  string
-		cfg   map[string]any
-		mount bool
-	}{
-		{"sin config", nil, false},
-		{"mount false", map[string]any{"fs": map[string]any{"mount": false}}, false},
-		{"mount true", map[string]any{"fs": map[string]any{"mount": true}}, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := map[string]any{"proc": map[string]any{"exec": true}}
-			for k, v := range tc.cfg {
-				cfg[k] = v
-			}
-			p, done := load(t, cfg)
-			defer done()
-			// The example plugin does not read files, so this asserts the
-			// wiring: a mount that is not granted is simply not configured.
-			got := p.Mounts(dir)
-			if tc.mount && (len(got) != 1 || got[0].Host != dir || got[0].Guest != "/") {
-				t.Fatalf("granted mount did not resolve: %+v", got)
-			}
-			if !tc.mount && len(got) != 0 {
-				t.Fatalf("mount granted without config: %+v", got)
-			}
-		})
-	}
-}
-
 func TestServe_outWritesWithoutAnswer(t *testing.T) {
 	var stdout, answers bytes.Buffer
 	p := &Plugin{}
@@ -279,38 +159,6 @@ func TestServe_outWritesWithoutAnswer(t *testing.T) {
 	}
 	if got := answers.String(); got != "" {
 		t.Fatalf("out unexpectedly received an answer: %q", got)
-	}
-}
-
-func TestServe_slinkCreatesLinkWhenGranted(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "source"), []byte("linked"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	p := &Plugin{Config: map[string]any{"fs": map[string]any{"slink": true}}}
-	res := serveOp(t, p, Host{Dir: dir}, Op{Op: OpSlink, Src: "source", Dst: "link"})
-	if !res.OK || res.Code != 0 || res.Error != "" {
-		t.Fatalf("result=%+v", res)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "link"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := string(data); got != "linked" {
-		t.Fatalf("linked content=%q", got)
-	}
-}
-
-func TestServe_slinkRefusesWithoutGrant(t *testing.T) {
-	dir := t.TempDir()
-	p := &Plugin{}
-	res := serveOp(t, p, Host{Dir: dir}, Op{Op: OpSlink, Src: "source", Dst: "link"})
-	const want = "not granted: fs.slink — enable it under engine.plugins[].config.fs.slink"
-	if res.Error != want {
-		t.Fatalf("error=%q, want %q", res.Error, want)
-	}
-	if _, err := os.Lstat(filepath.Join(dir, "link")); !os.IsNotExist(err) {
-		t.Fatalf("ungranted slink created dst: %v", err)
 	}
 }
 
@@ -413,4 +261,88 @@ func serveOp(t *testing.T, p *Plugin, host Host, op Op) Result {
 		t.Fatalf("decode result %q: %v", answers.String(), err)
 	}
 	return res
+}
+
+func TestInvoke_execRunsCommands(t *testing.T) {
+	dir := t.TempDir()
+	p, done := load(t, nil)
+	defer done()
+
+	out, err := p.Invoke(context.Background(), Request{
+		Body: "touch marker\ntouch ${NAME}",
+		Argv: map[string]string{"NAME": "second"},
+	}, Host{Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Code != 0 {
+		t.Fatalf("code=%d", out.Code)
+	}
+	for _, f := range []string{"marker", "second"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+	}
+}
+
+func TestServe_slinkCreatesTheLink(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "source"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &Plugin{}
+	res := serveOp(t, p, Host{Dir: dir}, Op{Op: OpSlink, Src: "source", Dst: "link"})
+	if res.Error != "" {
+		t.Fatalf("error=%q", res.Error)
+	}
+	if !res.OK {
+		t.Fatal("slink reported failure")
+	}
+	got, err := os.Readlink(filepath.Join(dir, "link"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(got) != "source" {
+		t.Fatalf("link points at %q", got)
+	}
+}
+
+// The default is the catalog's own directory: a script that cannot read the
+// repository it belongs to is not useful, and withholding it defends nothing.
+func TestMounts_defaultsToTheCatalog(t *testing.T) {
+	dir := t.TempDir()
+	p := &Plugin{}
+	got := p.Mounts(dir)
+	if len(got) != 1 || got[0].Host != dir || got[0].Guest != "/" {
+		t.Fatalf("mounts=%+v", got)
+	}
+}
+
+func TestMounts_shapes(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		name string
+		cfg  map[string]any
+		want []Mount
+	}{
+		{"true is the catalog", map[string]any{"fs": map[string]any{"mount": true}},
+			[]Mount{{Host: dir, Guest: "/"}}},
+		{"false is nothing", map[string]any{"fs": map[string]any{"mount": false}}, nil},
+		{"a list", map[string]any{"fs": map[string]any{"mount": []any{".", "/tmp"}}},
+			[]Mount{{Host: dir, Guest: "/"}, {Host: "/tmp", Guest: "/tmp"}}},
+		{"a mapping", map[string]any{"fs": map[string]any{"mount": map[string]any{"/opt/x": "/x"}}},
+			[]Mount{{Host: "/opt/x", Guest: "/x"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := (&Plugin{Config: tc.cfg}).Mounts(dir)
+			if len(got) != len(tc.want) {
+				t.Fatalf("mounts=%+v want %+v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Fatalf("mounts=%+v want %+v", got, tc.want)
+				}
+			}
+		})
+	}
 }

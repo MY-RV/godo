@@ -24,39 +24,42 @@ WASI can write one, and a plugin can be tested as an ordinary program —
 echo '{"api":1,"body":"echo hi","argv":{},"args":[]}' | ./plugin
 ```
 
-## The sandbox
+## What is pinned, and what is not
 
-It starts shut, and nothing here disables anything — nothing is granted. With
-an empty `config`, measured from inside a plugin:
+A plugin is third-party code that runs when someone types `godo test`. The
+question worth answering is **which artifact**, and the `sha256` answers it:
+the bytes that run are the bytes that were reviewed, or nothing runs.
 
+What a plugin may *do* is not pinned, and pretending otherwise would be
+theatre. A catalog's scripts already run with the shell's full reach — `godo
+test` has always been `sh -c` with no sandbox — and a plugin body is a script
+in that same catalog, written by the same people. There is nobody to defend it
+from.
+
+A wasm guest does have no network, no `fork` and no `subprocess`, so a script
+reaches the outside by asking godo. That is a property of the platform, not a
+policy: godo performs what it is asked.
+
+## `config`
+
+The plugin's own block, carried across verbatim. **godo does not interpret
+it** — its keys, their meaning and their defaults belong to the plugin that
+reads them.
+
+The one exception is `fs.mount`, and it is configuration rather than
+permission: a guest cannot mount anything itself, so somebody has to say what
+it sees, and only the catalog knows.
+
+```yaml
+config:
+  fs: {mount: true}                         # the catalog's directory, as /
+  fs: {mount: [".", "/tmp"]}                # those, each at its own name
+  fs: {mount: {".": "/", "/opt/x": "/x"}}   # explicit guest paths
 ```
-os.listdir(".")     OSError [Errno 44] ENOENT
-open("/etc/passwd") OSError [Errno 44] ENOENT
-os.getenv("HOME")   None
-time.time()         1640995200.0      (frozen)
-import socket       the module is not there
-```
 
-`engine.plugins[].config` adds back exactly what it names, and nothing else.
-
-| Grant | Gives |
-|-------|-------|
-| `proc.exec` | the `exec` op |
-| `fs.mount` | the catalog's own directory, as the guest's root |
-| `fs.slink` | the `slink` op |
-| `fs.slink` | the `slink` op |
-| `time.wall` | the real clock instead of a frozen one |
-
-`fs.mount` is a bool, not a path: what gets mounted is the directory the
-`godo.yaml` lives in, never somewhere the file names. A catalog that chose its
-own mount point could ask for `/`, and the grant would mean nothing.
-
-`fs.slink` is not confined the same way. A relative path resolves against the
-catalog's directory, but it may leave it — a git worktree is created *beside* a
-repository, and linking into it is the use case. Confining it would also be
-theatre: `proc.exec` can run `ln -s` anywhere, so a `slink` narrower than
-`exec` protects nothing. The grant is the boundary; withhold it from a plugin
-you would not hand a shell.
+Omitted, a plugin gets the directory its `godo.yaml` lives in. A script that
+cannot read the repository it belongs to is not useful, and withholding it
+defends nothing.
 
 ## Request
 
@@ -80,16 +83,16 @@ One line, written once, before anything else.
 | `body` | The script body, **verbatim**. `${godo:…}` is not expanded — that is shell-space syntax, and the values are on this request already |
 | `argv` | The matcher's captures |
 | `args` | Tokens left over after the match |
-| `config` | The plugin's own block, verbatim |
+| `config` | The plugin's own block, verbatim — godo reads only `fs.mount` |
 
 A plugin must read the request before writing anything. The pipes are
 unbuffered, so a plugin that spoke first would deadlock.
 
 ## Ops
 
-| Op | Answered | Needs |
-|----|----------|-------|
-| `exec` | yes | `config.proc.exec` |
+| Op | Answered |
+|----|----------|
+| `exec` | yes |
 | `out` | no | — |
 | `slink` | yes | `config.fs.slink` |
 
@@ -107,25 +110,6 @@ unbuffered, so a plugin that spoke first would deadlock.
 
 `error` is godo refusing — an unknown op, or a capability the catalog did not
 grant. A command that ran and failed is `code`, not `error`.
-
-## Capabilities
-
-Deny by default. An absent section, an absent key, or anything that is not
-exactly `true`, is not granted:
-
-```yaml
-config:
-  proc:
-    exec: true
-```
-
-```
-lines: line 1: not granted: proc.exec — enable it under
-engine.plugins[].config.proc.exec
-```
-
-`config` is otherwise the plugin's: its keys, its meaning, its defaults. godo
-reads only what it gates on.
 
 ## Preview
 

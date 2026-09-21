@@ -108,18 +108,6 @@ func TestE2E_previewPrintsTheBodyAndStartsNothing(t *testing.T) {
 	}
 }
 
-// Preview works with nothing granted at all: it never reaches the sandbox.
-func TestE2E_previewNeedsNoGrants(t *testing.T) {
-	cwd := pluginCatalog(t, false, "  # @runner lines\n  boot: |\n    touch one\n")
-	app, out, _ := e2eApp(t, cwd)
-	if err := app.Run([]string{"--preview", "boot"}); err != nil {
-		t.Fatal(err)
-	}
-	if strings.TrimSpace(out.String()) != "touch one" {
-		t.Fatalf("preview=%q", out.String())
-	}
-}
-
 // Captures and leftover args reach the plugin as data, not pasted into a line.
 func TestE2E_pluginReceivesCapturesAndArgs(t *testing.T) {
 	cwd := pluginCatalog(t, true,
@@ -144,19 +132,6 @@ func TestE2E_pluginReceivesCapturesAndArgs(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(cwd, f)); err != nil {
 			t.Fatalf("%q: %v", f, err)
 		}
-	}
-}
-
-// Deny by default: without config.proc.exec the plugin cannot run anything.
-func TestE2E_pluginCannotExecWithoutTheGrant(t *testing.T) {
-	cwd := pluginCatalog(t, false, "  # @runner lines\n  boot: |\n    touch one\n")
-	app, _, _ := e2eApp(t, cwd)
-	err := app.Run([]string{"boot"})
-	if err == nil {
-		t.Fatal("want failure")
-	}
-	if _, serr := os.Stat(filepath.Join(cwd, "one")); serr == nil {
-		t.Fatal("an ungranted exec ran anyway")
 	}
 }
 

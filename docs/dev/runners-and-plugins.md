@@ -80,14 +80,14 @@ None of this is built:
    platform, sandboxed by default).
 2. Ship MicroPython as that `.wasm`, with the host API from the prototype
    (`godo.argv`, `godo.args`, `godo.proc`, `godo.fs`).
-3. Fetch and pin it: `sha256` required, no auto-update, capabilities granted
-   deny-all through the plugin's own `config:`.
+3. Fetch and pin it: `sha256` required, no auto-update.
 
 Two constraints worth keeping when that work starts:
 
-- **Every effect goes through host functions.** Not because sandboxing is
-  fashionable, but because it is the only way `--preview` keeps working on a
-  body that is a program: a recording host can show what the script would run
-  without running it.
-- **The plugin cannot police itself.** It declares which host function each
-  `config:` key unlocks; godo does the gating.
+- **What is pinned is which plugin, not what it may do.** A catalog's scripts
+  already run with the shell's full reach, and a plugin body is a script in
+  that same catalog. The `sha256` answers the question that has an answer:
+  these are the bytes that were reviewed.
+- **A guest reaches the outside only by asking**, because wasm has no network,
+  no `fork` and no `subprocess`. That is the platform, not a policy godo
+  enforces on a script its own author wrote.
