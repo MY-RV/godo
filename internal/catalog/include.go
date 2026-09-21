@@ -16,9 +16,13 @@ const (
 // resolveIncludes replaces a body that is exactly ${godo:file(path)} with the
 // contents of that file.
 //
-// This is inclusion, not expansion. It happens when a body is read rather than
+// This is inclusion, not expansion: it happens when a body is read rather than
 // when it is rendered, which is why it applies to every runner — a plugin body
 // is never expanded, and still has to be able to live in a file.
+//
+// After this, an included body is indistinguishable from one pasted into the
+// YAML. Whatever a runner does with ${godo:…} it does here too; inclusion
+// changes where the text comes from, never what happens to it next.
 //
 // Only a whole value is accepted. Splicing a file into the middle of a line
 // would paste newlines into a shell command and mean something different every

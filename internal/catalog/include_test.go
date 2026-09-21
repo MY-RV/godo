@@ -129,3 +129,36 @@ func TestInclude_inAList(t *testing.T) {
 		t.Fatalf("commands=%q", got)
 	}
 }
+
+// An included body behaves exactly as if it had been pasted into the YAML.
+// Inclusion changes where the text comes from, never what happens to it after.
+func TestInclude_behavesLikeAPastedBody(t *testing.T) {
+	dir := t.TempDir()
+	const body = "echo the arg was: ${godo:args[0]}"
+	if err := os.WriteFile(filepath.Join(dir, "b.sh"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := writeCat(t, dir, "version: \"0.1\"\nscripts:\n"+
+		"  included: ${godo:file(b.sh)}\n"+
+		"  pasted: \""+body+"\"\n")
+	cat, err := catalog.LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng := catalog.NewEngine(cat, runnerFunc(func(string) error { return nil }))
+
+	one, err := eng.PreviewLines([]string{"included", "hola"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := eng.PreviewLines([]string{"pasted", "hola"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(one) != 1 || one[0] != two[0] {
+		t.Fatalf("included=%q pasted=%q", one, two)
+	}
+	if one[0] != "echo the arg was: hola" {
+		t.Fatalf("got %q", one[0])
+	}
+}

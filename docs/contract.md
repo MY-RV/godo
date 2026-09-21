@@ -305,10 +305,20 @@ scripts:
 It uses the `${godo:…}` namespace because that namespace already exists and is
 already godo's alone — there is nothing for it to collide with.
 
-It is **inclusion, not expansion**: it happens when the body is read rather
-than when it is rendered. So it works for every runner, including one whose
-bodies are never expanded, and `${godo:…}` *inside* the included file is left
-alone. That text belongs to whatever runs it.
+It is **inclusion, not expansion**, and the two happen at different times:
+
+| | when | what |
+|--|------|------|
+| `${godo:file(…)}` | reading the catalog | the body becomes the file's contents |
+| `${godo:args…}`, `${godo:argv[…]}` | building the plan | values are substituted, for runners that take a rendered line |
+
+Because inclusion happens first, it works for every runner — including one
+whose bodies are never expanded at all.
+
+After that, an included body behaves **exactly as if it had been pasted into
+the YAML**. There is no second rule: under `shell` its `${godo:args…}` expand
+like any other body's, and under a plugin runner they stay literal, because
+that runner's bodies are not expanded either way.
 
 - The path is relative to the `godo.yaml`, not to the caller's directory: a
   script says where its body lives, and that does not move.
