@@ -257,12 +257,12 @@ func TestInvoke_mountIsGatedAndScoped(t *testing.T) {
 			defer done()
 			// The example plugin does not read files, so this asserts the
 			// wiring: a mount that is not granted is simply not configured.
-			got := p.MountedDir(dir)
-			if tc.mount && got != dir {
-				t.Fatalf("granted mount did not resolve: %q", got)
+			got := p.Mounts(dir)
+			if tc.mount && (len(got) != 1 || got[0].Host != dir || got[0].Guest != "/") {
+				t.Fatalf("granted mount did not resolve: %+v", got)
 			}
-			if !tc.mount && got != "" {
-				t.Fatalf("mount granted without config: %q", got)
+			if !tc.mount && len(got) != 0 {
+				t.Fatalf("mount granted without config: %+v", got)
 			}
 		})
 	}

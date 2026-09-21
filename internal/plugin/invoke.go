@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/tetratelabs/wazero"
@@ -59,10 +60,12 @@ func (p *Plugin) Invoke(ctx context.Context, req Request, host Host) (Outcome, e
 		WithStderr(stderr).
 		WithArgs("plugin").
 		WithName("")
-	if dir := p.mountDir(host.Dir); dir != "" {
-		// Scoped to one directory, which becomes the guest's root. A script
-		// can reach the catalog it belongs to and nothing above it.
-		cfg = cfg.WithFSConfig(wazero.NewFSConfig().WithDirMount(dir, "/"))
+	if mounts := p.Mounts(host.Dir); len(mounts) > 0 {
+		fs := wazero.NewFSConfig()
+		for _, m := range mounts {
+			fs = fs.WithDirMount(m.Host, m.Guest)
+		}
+		cfg = cfg.WithFSConfig(fs)
 	}
 	if p.granted("time", "wall") {
 		cfg = cfg.WithSysWalltime().WithSysNanotime()
@@ -251,21 +254,73 @@ func orStd(w io.Writer, def io.Writer) io.Writer {
 	return w
 }
 
-// mountDir returns the directory to mount, or "" for no filesystem.
-//
-// config.fs.mount is a bool rather than a path: what gets mounted is the
-// catalog's own directory, never somewhere the catalog names. A file that
-// picks its own mount point could ask for "/" and the grant would mean
-// nothing.
-func (p *Plugin) mountDir(catalogDir string) string { return p.MountedDir(catalogDir) }
+// Mount is one directory the guest can see, and where it sees it.
+type Mount struct {
+	Host  string // the real path
+	Guest string // where it appears inside the sandbox
+}
 
-// MountedDir reports which directory this plugin would be given, or "" for
-// none. Exported so a caller can show the grant without invoking anything.
-func (p *Plugin) MountedDir(catalogDir string) string {
-	if catalogDir == "" || !p.granted("fs", "mount") {
-		return ""
+// Mounts returns the directories config.fs.mount asks for.
+//
+// Three shapes, because a catalog that only wants its own directory should not
+// have to say so twice:
+//
+//	fs: {mount: true}                       the catalog's directory, as /
+//	fs: {mount: [".", "/tmp"]}              those, each at its own name
+//	fs: {mount: {".": "/", "/tmp": "/tmp"}} explicit guest paths
+//
+// A relative host path resolves against the catalog. Nothing else is visible:
+// a directory the config does not name does not exist inside the sandbox, and
+// no path can climb out of one that it does.
+func (p *Plugin) Mounts(catalogDir string) []Mount {
+	raw, ok := p.configValue("fs", "mount")
+	if !ok {
+		return nil
 	}
-	return catalogDir
+	resolve := func(host string) string {
+		if host == "" {
+			host = "."
+		}
+		if !filepath.IsAbs(host) && catalogDir != "" {
+			return filepath.Join(catalogDir, host)
+		}
+		return host
+	}
+	switch v := raw.(type) {
+	case bool:
+		if !v || catalogDir == "" {
+			return nil
+		}
+		return []Mount{{Host: catalogDir, Guest: "/"}}
+	case []any:
+		var out []Mount
+		for i, item := range v {
+			host, ok := item.(string)
+			if !ok {
+				continue
+			}
+			guest := host
+			if i == 0 && (host == "." || host == "./") {
+				// The first entry being the catalog is the common case, and it
+				// belongs at the root so relative paths in a script just work.
+				guest = "/"
+			}
+			out = append(out, Mount{Host: resolve(host), Guest: guest})
+		}
+		return out
+	case map[string]any:
+		var out []Mount
+		for host, g := range v {
+			guest, ok := g.(string)
+			if !ok {
+				continue
+			}
+			out = append(out, Mount{Host: resolve(host), Guest: guest})
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].Guest < out[j].Guest })
+		return out
+	}
+	return nil
 }
 
 // grantNote lists what this plugin was granted, for a failure message.
@@ -273,28 +328,44 @@ func (p *Plugin) MountedDir(catalogDir string) string {
 // A script inside a shut sandbox fails in the language's own words — a missing
 // file is ENOENT, not "you did not grant fs.mount" — and the connection is
 // invisible from inside. This does not claim to know why something failed; it
-// puts the grants next to the failure so the reader can see what was and was
-// not available.
-func (p *Plugin) grantNote() string {
+// puts the grants next to the failure so the reader can join them.
+func (p *Plugin) grantNote(catalogDir string) string {
 	var have []string
-	for _, c := range []struct{ section, key string }{
-		{"proc", "exec"},
-		{"fs", "mount"},
-		{"fs", "slink"},
-		{"time", "wall"},
-	} {
-		if p.granted(c.section, c.key) {
-			have = append(have, c.section+"."+c.key)
-		}
+	if p.granted("proc", "exec") {
+		have = append(have, "proc.exec")
+	}
+	if p.granted("fs", "slink") {
+		have = append(have, "fs.slink")
+	}
+	if p.granted("time", "wall") {
+		have = append(have, "time.wall")
+	}
+	mounts := p.Mounts(catalogDir)
+	for _, m := range mounts {
+		have = append(have, "fs.mount "+m.Guest)
 	}
 	if len(have) == 0 {
 		return "\n  granted: nothing — see engine.plugins[].config"
 	}
 	note := "\n  granted: " + strings.Join(have, ", ")
-	if !p.granted("fs", "mount") {
+	if len(mounts) == 0 {
 		note += "\n  no filesystem: add fs.mount under its config if the script reads or writes files"
 	}
 	return note
+}
+
+// configValue reads config[section][key] without deciding what it means.
+func (p *Plugin) configValue(section, key string) (any, bool) {
+	raw, ok := p.Config[section]
+	if !ok {
+		return nil, false
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	v, ok := m[key]
+	return v, ok
 }
 
 // granted reports whether config grants section.key.
