@@ -5,7 +5,13 @@
 // internal/catalog; the CLI entrypoint is cmd/godo.
 package godo
 
-import "github.com/my-rv/godo/internal/catalog"
+import (
+	"regexp"
+	"runtime/debug"
+	"strings"
+
+	"github.com/my-rv/godo/internal/catalog"
+)
 
 // Version is the CLI/module version (not godo.yaml file.version).
 // Override at link time:
@@ -13,7 +19,46 @@ import "github.com/my-rv/godo/internal/catalog"
 //	-ldflags "-X github.com/my-rv/godo.Version=v0.1.0"
 //
 // Default stays -dev until a release build injects a tag.
+// The initializer is a constant on purpose: -X only reaches a string variable
+// that has one.
 var Version = "0.1.0-dev"
+
+const devVersion = "0.1.0-dev"
+
+// Release is the version this binary should report: Version when a release
+// build stamped it, and otherwise the tag `go install pkg@tag` recorded.
+//
+// It matters because `go install github.com/my-rv/godo/cmd/godo@v0.3.0` runs
+// no linker flags of ours, so Version stays at its default and the binary
+// would claim to be 0.1.0 — old enough for `engine.version` to refuse a
+// catalog the binary actually satisfies.
+func Release() string {
+	if Version != devVersion {
+		return Version
+	}
+	bi, ok := debug.ReadBuildInfo()
+	if !ok || !taggedVersion(bi.Main.Version) {
+		return Version
+	}
+	return bi.Main.Version
+}
+
+// reTimestamp matches the 14-digit stamp inside a pseudo-version.
+var reTimestamp = regexp.MustCompile(`[0-9]{14}`)
+
+// taggedVersion reports whether v is a version someone tagged, as opposed to
+// "(devel)" or a pseudo-version Go derived from a commit. A build from a
+// working tree is a dev build however Go describes it, and saying so is more
+// use than a number nobody released.
+func taggedVersion(v string) bool {
+	if v == "" || v == "(devel)" {
+		return false
+	}
+	if strings.ContainsAny(v, "+ ") { // +dirty, +incompatible
+		return false
+	}
+	return !reTimestamp.MatchString(v)
+}
 
 // Re-exported names and sentinels.
 const FileName = catalog.FileName

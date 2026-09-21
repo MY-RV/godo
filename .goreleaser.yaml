@@ -58,6 +58,10 @@ checksum:
 # Packaging homes. Both pushes need a PAT with write access to those repos,
 # exposed to the release workflow as TAP_GITHUB_TOKEN; without it the release
 # still publishes, it just does not update the tap or the bucket.
+# A pre-release is skipped as well: `brew install` and `scoop install` are how
+# people get the version they are meant to run, so a preview must not land
+# there. Spelled out with .Prerelease rather than the `auto` shorthand, so the
+# rule reads the same in both pipes and cannot be read as anything else.
 # Homebrew ships pre-built binaries as casks now; `brews` is deprecated and
 # makes `goreleaser check` fail. Casks are macOS-only — Linux installs go
 # through `go install` or the release binary (docs/install.md).
@@ -72,7 +76,7 @@ homebrew_casks:
     directory: Casks
     homepage: "https://github.com/MY-RV/godo"
     description: "Thin repo command catalog"
-    skip_upload: '{{ if .Env.TAP_GITHUB_TOKEN }}false{{ else }}true{{ end }}'
+    skip_upload: '{{ if and .Env.TAP_GITHUB_TOKEN (not .Prerelease) }}false{{ else }}true{{ end }}'
     hooks:
       post:
         install: |
@@ -91,7 +95,7 @@ scoops:
     homepage: "https://github.com/MY-RV/godo"
     description: "Thin repo command catalog"
     license: "MIT"
-    skip_upload: '{{ if .Env.TAP_GITHUB_TOKEN }}false{{ else }}true{{ end }}'
+    skip_upload: '{{ if and .Env.TAP_GITHUB_TOKEN (not .Prerelease) }}false{{ else }}true{{ end }}'
 
 changelog:
   sort: asc

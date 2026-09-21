@@ -34,6 +34,23 @@ Local build:
 go build -ldflags "-X github.com/my-rv/godo.Version=v0.2.0" -o godo ./cmd/godo
 ```
 
+## Preview releases
+
+A preview is published as a GitHub **pre-release**. `godo -e update` reads the
+*latest release*, and package managers carry the same, so a preview never
+arrives on its own — you go and get it:
+
+```bash
+go install github.com/my-rv/godo/cmd/godo@v0.3.0-preview.1
+```
+
+or download the `v0.3.0-preview.1` assets from
+[Releases](https://github.com/MY-RV/godo/releases).
+
+On a preview binary `godo -e update check` reports no update available: the
+newest release really is older than what you are running. Reinstalling the
+stable line (`brew`, `scoop`, or `@latest`) is how you leave a preview.
+
 ## Package managers
 
 ```bash

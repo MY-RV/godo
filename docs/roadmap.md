@@ -16,11 +16,16 @@ This is what we **commit to communicate**. Pre-1.0 APIs can still change within 
 
 **Not promised in v0.1:** Homebrew/Scoop installs, dialects `nscript`/`matchns`, stable Go API.
 
-## v0.3 — in progress, unreleased
+## v0.3 — previewed as `v0.3.0-preview.1`
 
 Breaking: the shell that runs your scripts changes, and file fields move into
-`engine:`. **Held until plugin loading works** — `engine:` without a loader is
-half a promise, and this release is where the promise gets made.
+`engine:`. It was held until plugin loading worked — `engine:` without a loader
+is half a promise, and this is the release where the promise gets made.
+
+A preview is a GitHub pre-release: `godo -e update` does not offer it, and
+neither Homebrew nor Scoop carries it. It is on
+[Releases](https://github.com/MY-RV/godo/releases) and on
+`go install github.com/my-rv/godo/cmd/godo@v0.3.0-preview.1`.
 
 | Promise | |
 |---------|--|
@@ -30,17 +35,21 @@ half a promise, and this release is where the promise gets made.
 | `engine:` block | `version`, `dialect`, `runner`, `plugins` — what godo needs, apart from what the scripts are |
 | `engine.version` | Minimum binary, enforced before anything runs |
 | `godo -e runners` | What is usable here, and how to check which shell you are in |
+| Plugin loading | WASM via `wazero`, digest-pinned — see [runners and plugins](./dev/runners-and-plugins.md) |
+| `godo -e plugins` | Declare, install and list plugins; the digest is computed, never typed |
 | Compatibility | Top-level `dialect:` keeps working |
 
 ### Landed
 
 Everything in the table above.
 
-### Still required before v0.3 ships
+### Before v0.3.0 ships
 
-- **Plugin loading.** `engine.plugins` parses and validates; nothing reads the
-  artifact yet. WASM via `wazero`, digest-pinned — see
-  [runners and plugins](./dev/runners-and-plugins.md).
+- Preview feedback. Plugin loading is new, and the preview is where it gets
+  found out.
+- The plugin protocol is **not** frozen by this preview. A plugin is pinned by
+  digest, so a protocol change cannot silently break a catalog — it fails by
+  naming the plugin.
 
 **Not promised in v0.3:** Windows shell detection is written from the
 documented behavior of those shells; it compiles and vets for `windows/amd64`
@@ -52,8 +61,6 @@ but is unverified on a real Windows host. `GODO_SHELL` overrides it.
 - Optional: winget (`MY-RV.Godo`), later choco / AUR / Nix as demand appears
 - Engine command registry polish; more e2e
 - Dialects backlog only if explicitly promoted here
-- Plugin loading (WASM via wazero, digest-pinned) — see
-  [runners and plugins](./dev/runners-and-plugins.md)
 
 ## v1.0 — future promise
 
