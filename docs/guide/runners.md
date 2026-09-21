@@ -83,7 +83,8 @@ A shell that is not installed fails when the plan is built, so nothing runs.
 
 ```
 $ godo -e runners
-inherit    /bin/zsh  [default]
+inherit    /bin/zsh
+           the default runner, your $SHELL
 
 shells found here:
   sh         /bin/sh
@@ -103,11 +104,17 @@ Selection order:
 |--|--|
 | `GODO_SHELL` | Always wins |
 | Unix | `$SHELL`, else `/bin/sh` |
-| Windows | the parent process when it is a shell, else `%ComSpec%` |
+| Windows | the nearest shell in the process tree, else `%ComSpec%` |
 
-Windows reads the parent process because the environment cannot answer:
+Windows reads the process tree because the environment cannot answer:
 PowerShell sets `PSModulePath` and everything it starts inherits it, so a
 `cmd.exe` opened from PowerShell would look like PowerShell.
+
+It walks the tree rather than reading the parent alone because something is
+usually in between. A package manager's shim is the common one: scoop installs
+godo as `shims\godo.exe`, which starts the real `godo.exe` as a child — so the
+parent of the process asking the question is *godo*. The same shape appears
+with npm, bun and make wrappers, and inside an editor's terminal.
 
 On Unix, `$SHELL` is your *login* shell, not necessarily the one running right
 now — bash started inside zsh still reports zsh. Every other tool follows that

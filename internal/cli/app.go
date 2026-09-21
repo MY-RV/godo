@@ -396,7 +396,9 @@ func (a *App) nearestCatalog() *catalog.Catalog {
 }
 
 func (a *App) listRunners(cat *catalog.Catalog) error {
-	fmt.Fprintf(a.Stdout, "%-10s %s  [default]\n", string(catalog.RunnerInherit), execshell.DetectShell())
+	shell, why := execshell.DetectedShell()
+	fmt.Fprintf(a.Stdout, "%-10s %s\n", string(catalog.RunnerInherit), shell)
+	fmt.Fprintf(a.Stdout, "%-10s the default runner, %s\n", "", why)
 	fmt.Fprintln(a.Stdout)
 	fmt.Fprintln(a.Stdout, "shells found here:")
 	found := false
