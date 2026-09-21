@@ -107,6 +107,10 @@ func TestParse_engineRejects(t *testing.T) {
 }
 
 // A runner a plugin declares fails by naming the plugin, not as a typo.
+//
+// The engine does not load plugins — internal/plugin does, and the CLI wires
+// it up. An embedder that registers nothing sees this message rather than
+// "unknown runner", which would point at the catalog instead of the wiring.
 func TestBuildPlan_pluginRunnerNamesItsPlugin(t *testing.T) {
 	cat, err := catalog.Parse([]byte(pluginBlock), "x")
 	if err != nil {
@@ -117,7 +121,7 @@ func TestBuildPlan_pluginRunnerNamesItsPlugin(t *testing.T) {
 	if !errors.Is(err, catalog.ErrUnknownRunner) {
 		t.Fatalf("err=%v", err)
 	}
-	for _, want := range []string{"micropy", "godo-micropy", "cannot load plugins"} {
+	for _, want := range []string{"micropy", "godo-micropy", "should provide but did not"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("err=%v, missing %q", err, want)
 		}

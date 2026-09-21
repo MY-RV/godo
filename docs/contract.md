@@ -101,15 +101,31 @@ numbers.
 
 ### `engine.plugins`
 
-**No build loads plugins yet.** Entries are parsed and validated so the shape
-is settled and a catalog can already declare what it expects.
+```
+godo -e plugins                    what this catalog declares, and its state
+godo -e plugins install            fetch everything it declares
+godo -e plugins install <source>   add one, and fetch it
+```
+
+`install <source>` computes the digest from the artifact and writes the entry
+into `godo.yaml`. The digest is never asked for: a person cannot check a hash
+by reading it, so asking for one is how wrong hashes get committed.
+
+Artifacts live in `<user cache>/godo/plugins`, named by digest. A file sitting
+beside the `godo.yaml` is loaded from where it is — asking someone to install
+what they can already see would be ceremony, and its digest is checked either
+way. Anything else must be installed first; a run is not the moment to discover
+that something has to be downloaded.
+
+`http://` sources are refused. An artifact is code, and its integrity cannot
+rest on a transport anyone on the path can rewrite.
 
 | Field | |
 |-------|--|
-| `source` | Required. Where the plugin comes from |
+| `source` | Required. An `https://` URL, or a path relative to the `godo.yaml` |
 | `sha256` | **Required.** A plugin is third-party code that runs when someone types `godo test`; without a digest there is nothing to verify it is the code that was reviewed |
 | `provides` | Required. `"<kind>:<name>"` entries, kind being `runner` or `dialect`. Two plugins may not provide the same one |
-| `config` | Optional, and entirely the plugin's: its keys, its meaning, its defaults. godo carries it across without reading it |
+| `config` | Optional, and the plugin's: its keys, its meaning, its defaults. godo carries it across and reads only `fs.mount`, which says which directories the sandbox can see |
 
 A script asking for a runner a plugin provides fails by naming that plugin:
 
@@ -274,6 +290,41 @@ Trust: expanded lines pass through the host shell (`sh -c` / `cmd /C`). Catalog
 text is trusted — it is repo code. Values substituted into it are quoted, so
 arguments and captures are data, not shell syntax; `${godo:…:raw}` waives that for one
 placeholder and puts the trust decision back on the catalog author.
+
+## Bodies in a file
+
+A script's value may be a single `${godo:file(path)}`, and the body is then the
+contents of that file:
+
+```yaml
+scripts:
+  # @runner micropy
+  worktree create ${BRANCH} ${DIR}: ${godo:file(./worktree.godo.py)}
+```
+
+It uses the `${godo:…}` namespace because that namespace already exists and is
+already godo's alone — there is nothing for it to collide with.
+
+It is **inclusion, not expansion**, and the two happen at different times:
+
+| | when | what |
+|--|------|------|
+| `${godo:file(…)}` | reading the catalog | the body becomes the file's contents |
+| `${godo:args…}`, `${godo:argv[…]}` | building the plan | values are substituted, for runners that take a rendered line |
+
+Because inclusion happens first, it works for every runner — including one
+whose bodies are never expanded at all.
+
+After that, an included body behaves **exactly as if it had been pasted into
+the YAML**. There is no second rule: under `shell` its `${godo:args…}` expand
+like any other body's, and under a plugin runner they stay literal, because
+that runner's bodies are not expanded either way.
+
+- The path is relative to the `godo.yaml`, not to the caller's directory: a
+  script says where its body lives, and that does not move.
+- It must be the **whole value**. Splicing a file into part of a line would
+  paste newlines into a command; `echo ${godo:file(m.txt)}` is an error.
+- A `string[]` may mix included and inline entries.
 
 ## Script decorators (JSDoc style)
 
