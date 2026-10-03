@@ -135,5 +135,6 @@ scripts:
 ## Plugins
 
 `# @runner` is also how a body that is **not a shell line** says so — a plugin
-carrying its own interpreter. Nothing ships yet; see
+carrying its own interpreter. Declare it under `engine.plugins`, install it,
+name it on the script. How: [Plugins](./plugins.md). Why the axis exists:
 [runners and plugins](../dev/runners-and-plugins.md).

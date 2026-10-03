@@ -16,10 +16,12 @@ Product name: **GoDo**. CLI, module path, and file name stay lowercase `godo` (G
 
 Bare tokens never compete with engine commands: builtins live behind `-e` / `--engine` (plus a few flag aliases like `--version`).
 
-## Shape (v0.1)
+## Shape (v0.3)
 
-- Config: `godo.yaml`
-- Dialects: `package`, `matcher`
+- Config: `godo.yaml` — scripts in `scripts:`, dials in `engine:`
+- Dialects: `package`, `matcher` (built in)
+- Runners: the shell you are in by default; name one, or a plugin
+- Plugins: WASM runners, digest-pinned — [plugins](./guide/plugins.md)
 - Expand fails closed on bad placeholders / unexpected args
 
 ## Two audiences

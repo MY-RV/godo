@@ -27,12 +27,14 @@ describes it with a pseudo-version, and no one released that.
 `engine.version` is compared against `Release()`, so a binary installed at a
 tag is judged by the tag.
 
-## Stability today (v0.1)
+## Stability today (v0.3)
 
 | Surface | Stability |
 |---------|-----------|
 | CLI model (bare tokens = scripts; `-e` = engine) | Intentional; changes require contract update |
-| `godo.yaml` dialects `package` / `matcher` | Evolving in v0 |
+| `godo.yaml` dialects `package` / `matcher` | Evolving in v0; stay built in |
+| Runner axis / `engine.plugins` | Shipped in v0.3; evolving in v0 |
+| Plugin protocol (`api: 1`) | Not a forever freeze; pin by digest |
 | Facade types (`LoadFile`, `Engine`, …) | Evolving in v0 |
 | Dialects `nscript` / `matchns` | Backlog — not shipped |
 

@@ -24,6 +24,26 @@ godo --engine help
 
 **Prints** engine help to stderr (built-in subcommands).
 
+## Runners
+
+```bash
+godo -e runners
+```
+
+**Prints** which runners this machine can use, and **how** the default shell
+was chosen (`your $SHELL`, process tree, `GODO_SHELL`, …). Detail:
+[runners](./runners.md).
+
+## Plugins
+
+```bash
+godo -e plugins                 # what this catalog declares, and its state
+godo -e plugins install         # fetch everything it declares
+godo -e plugins install <src>   # add one, compute digest, write godo.yaml
+```
+
+A plugin is a digest-pinned WASM runner. How-to: [plugins](./plugins.md).
+
 ## Update
 
 | Command | Behavior |
@@ -38,8 +58,8 @@ godo --update-check
 **Example output** (already current):
 
 ```text
-current: 0.1.0-dev
-latest:  v0.2.0
+current: 0.3.0
+latest:  v0.3.0
 already up to date
 ```
 
@@ -69,5 +89,6 @@ Runs the **engine** self-update path (network / download), not `echo from-script
 ## Next
 
 - [Scripts](./scripts.md)
+- [Plugins](./plugins.md)
 - [Preview and ls](./preview-and-ls.md)
 - [CLI reference](../reference/cli.md)

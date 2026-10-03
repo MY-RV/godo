@@ -11,7 +11,7 @@ Product docs for using and shipping **GoDo** (CLI/module: `godo`).
 | [Install](./install.md) | Binaries, Go, self-update |
 | [Distribution](./distribution.md) | Releases and package channels |
 | [Release](./release.md) | Tags + GoReleaser (for publishers) |
-| [Roadmap](./roadmap.md) | Promises for v0.1 / post-v0.1 / v1.0 |
+| [Roadmap](./roadmap.md) | Promises for v0.1 / v0.3 / v1.0 |
 | [Contract](./contract.md) | Normative CLI + file behavior |
 
 ## Guides
@@ -26,6 +26,7 @@ One topic per file (copy-paste examples):
 | [Package dialect](./guide/package-dialect.md) | Exact names (default) |
 | [Matcher dialect](./guide/matcher-dialect.md) | Pattern keys + captures |
 | [Runners](./guide/runners.md) | Which shell runs your line; `runner:` / `# @runner` |
+| [Plugins](./guide/plugins.md) | WASM runners, digest-pinned; `godo -e plugins` |
 | [Deps](./guide/deps.md) | `# @deps` |
 | [Placeholders](./guide/placeholders.md) | `${…}` / `${godo:args…}` |
 | [Working directory](./guide/working-directory.md) | Catalog root, walk-up |

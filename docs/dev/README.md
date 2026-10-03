@@ -9,6 +9,7 @@ Internals and contributor conventions. Product docs live in [`docs/`](../README.
 | [Versioning](./versioning.md) | SemVer + binary vs file `version:` |
 | [Runners and plugins](./runners-and-plugins.md) | Premise: godo is a proxy; cross-OS is a plugin's job |
 | [Plugin protocol](./plugin-protocol.md) | The wire: WASI command, JSON ops, capabilities |
+| [Announce draft v0.3.0](./announce-v0.3.0.md) | GitHub Release body copy; drop after ship |
 | [Archive](./archive/README.md) | Brainstorm notes (historical) |
 
 Start with root [`CONTRIBUTING.md`](../../CONTRIBUTING.md).

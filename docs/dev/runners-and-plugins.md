@@ -1,7 +1,7 @@
 # Runners and plugins — design note
 
 Not the contract. [`contract.md`](../contract.md) is what we promise; nothing
-here is in [`roadmap.md`](../roadmap.md).
+here is in [`roadmap.md`](../roadmap.md). Product how-to: [`guide/plugins.md`](../guide/plugins.md).
 
 ## Premise
 
@@ -30,14 +30,14 @@ Two axes, and only one of them was open:
 A MicroPython body has no shell that can run it. For `micropy` to exist at all,
 godo needs a way for a script to say *this one is not a shell line*. That is
 the whole reason the runner axis exists — `runner:` / `# @runner` and a registry,
-with `shell` as the default.
+with `inherit` as the default.
 
 It is a socket, not a feature. What was added alongside it is not portability
-work either: `shell` hardcoded `sh` / `cmd`, so a zsh or PowerShell user ran
-their catalog under a shell they did not pick. `inherit` — now the default — uses
-the one they are in, and a catalog can name a shell outright (`# @runner
-bash`). Your shell is your responsibility; godo just stops lying about which
-one it is, and proxies to whatever `PATH` has.
+work either: the old default hardcoded `sh` / `cmd`, so a zsh or PowerShell
+user ran their catalog under a shell they did not pick. `inherit` — now the
+default — uses the one they are in, and a catalog can name a shell outright
+(`# @runner bash`). Your shell is your responsibility; godo just stops lying
+about which one it is, and proxies to whatever `PATH` has.
 
 A `shell` runner meaning "always `sh` / `cmd`" existed briefly and was removed:
 it was a third thing between "your shell" and "this shell", it kept
@@ -57,6 +57,10 @@ contradict the premise:
 - **A built-in POSIX interpreter** (`mvdan.cc/sh`). Same reason, plus a
   dependency, and it is cross-OS work that belongs in a plugin.
 - **A structured `Line` / `Part` expansion.** Only existed to serve `exec`.
+- **Moving `matcher` (or `package`) into a plugin.** Matching is which script
+  answers the tokens — catalog work, needed before any runner starts. Both
+  dialects have been promised since v0.1. The `provides: dialect:…` shape is
+  reserved for *new* dialects later; it is not a plan to hollow out the core.
 
 The reserved dialect names `nscript` / `matchns` stay reserved and unplanned.
 
@@ -67,22 +71,21 @@ The reserved dialect names `nscript` / `matchns` stay reserved and unplanned.
 needs to do it. That line is what lets the toolchain side grow — a lockfile, a
 package manager — without the script side growing with it.
 
-The block parses and validates today; nothing loads from it. `sha256` is
-required from the start rather than added later, because a plugin is
-third-party code that runs on `godo test` and a digest is the only thing that
-says it is the code that was reviewed.
+`sha256` is required from the start rather than added later, because a plugin
+is third-party code that runs on `godo test` and a digest is the only thing
+that says it is the code that was reviewed.
 
-## What is actually left for plugins
-
-None of this is built:
+## What landed
 
 1. Load a `.wasm` at runtime (`wazero`: pure Go, no cgo, one artifact for every
-   platform, sandboxed by default).
-2. Ship MicroPython as that `.wasm`, with the host API from the prototype
-   (`godo.argv`, `godo.args`, `godo.proc`, `godo.fs`).
-3. Fetch and pin it: `sha256` required, no auto-update.
+   platform). Wire: [`plugin-protocol.md`](./plugin-protocol.md).
+2. Fetch and pin it: `godo -e plugins install`, `sha256` required, no
+   auto-update of a digest already in the catalog.
+3. A worked example in-tree: [`examples/plugins/lines`](../../examples/plugins/lines).
+   A real interpreter lives elsewhere —
+   [godo-micropy](https://github.com/MY-RV/godo-micropy).
 
-Two constraints worth keeping when that work starts:
+Constraints that stayed true:
 
 - **What is pinned is which plugin, not what it may do.** A catalog's scripts
   already run with the shell's full reach, and a plugin body is a script in

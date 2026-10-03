@@ -2,7 +2,7 @@
 
 This is what we **commit to communicate**. Pre-1.0 APIs can still change within a minor.
 
-## v0.1 (first public release) — promised
+## v0.1 (first public release) — shipped
 
 | Promise | |
 |---------|--|
@@ -16,16 +16,15 @@ This is what we **commit to communicate**. Pre-1.0 APIs can still change within 
 
 **Not promised in v0.1:** Homebrew/Scoop installs, dialects `nscript`/`matchns`, stable Go API.
 
-## v0.3 — previewed as `v0.3.0-preview.2`
+## v0.3 — ready as `v0.3.0`
 
 Breaking: the shell that runs your scripts changes, and file fields move into
 `engine:`. It was held until plugin loading worked — `engine:` without a loader
 is half a promise, and this is the release where the promise gets made.
 
-A preview is a GitHub pre-release: `godo -e update` does not offer it, and
-neither Homebrew nor Scoop carries it. It is on
-[Releases](https://github.com/MY-RV/godo/releases) and on
-`go install github.com/my-rv/godo/cmd/godo@v0.3.0-preview.2`.
+Previewed as `v0.3.0-preview.1` / `preview.2`. Those stayed GitHub pre-releases
+(`godo -e update`, Homebrew and Scoop never offered them). After the stable
+tag, those channels carry `v0.3.0`.
 
 | Promise | |
 |---------|--|
@@ -35,32 +34,31 @@ neither Homebrew nor Scoop carries it. It is on
 | `engine:` block | `version`, `dialect`, `runner`, `plugins` — what godo needs, apart from what the scripts are |
 | `engine.version` | Minimum binary, enforced before anything runs |
 | `godo -e runners` | What is usable here, and how to check which shell you are in |
-| Plugin loading | WASM via `wazero`, digest-pinned — see [runners and plugins](./dev/runners-and-plugins.md) |
+| Plugin loading | WASM via `wazero`, digest-pinned — see [plugins](./guide/plugins.md) |
 | `godo -e plugins` | Declare, install and list plugins; the digest is computed, never typed |
 | Compatibility | Top-level `dialect:` keeps working |
 
 ### Landed
 
-Everything in the table above.
+Everything in the table above. Windows shell detection, CRLF catalogs and
+`fs.slink` (junction / hard link) were verified on a real Windows host during
+the preview. Plugin install + run is covered by e2e on macOS/Linux (and the
+example plugin under `examples/plugins/lines`).
 
-### Before v0.3.0 ships
+### Still true after v0.3.0
 
-- Preview feedback. Plugin loading is new, and the preview is where it gets
-  found out. preview.1 on Windows already produced three fixes.
-- **Windows verification.** preview.2 fixes shell detection, CRLF catalogs and
-  `fs.slink`; the junction syscall behind `slink` has still been run by nobody.
-- The plugin protocol is **not** frozen by this preview. A plugin is pinned by
-  digest, so a protocol change cannot silently break a catalog — it fails by
+- The plugin **protocol** (`api: 1`) is not a forever freeze. A plugin is pinned
+  by digest, so a protocol change cannot silently break a catalog — it fails by
   naming the plugin.
+- `provides: dialect:…` is accepted in the catalog shape and not loaded.
+  `package` and `matcher` stay built in.
+- Dialects `nscript` / `matchns` stay reserved and unplanned.
 
-**Not promised in v0.3:** Windows shell detection is written from the
-documented behavior of those shells; it compiles and vets for `windows/amd64`
-but is unverified on a real Windows host. `GODO_SHELL` overrides it.
+## Post-v0.3 — intended (not promised dates)
 
-## Post-v0.1 — intended (not promised dates)
-
-- Shared family packaging: `MY-RV/homebrew-tap` (`brew install --cask MY-RV/tap/godo`), `MY-RV/scoop-bucket`
+- Shared family packaging continues: `MY-RV/homebrew-tap`, `MY-RV/scoop-bucket`
 - Optional: winget (`MY-RV.Godo`), later choco / AUR / Nix as demand appears
+- Dialect plugins (load `provides: dialect:…`), only if a real dialect needs it
 - Engine command registry polish; more e2e
 - Dialects backlog only if explicitly promoted here
 
