@@ -4,7 +4,7 @@
 
 From [GitHub Releases](https://github.com/MY-RV/godo/releases):
 
-1. Download the asset for your OS/arch, e.g. `godo_0.3.0_darwin_arm64` (bare) or the `.tar.gz` / `.zip`
+1. Download the asset for your OS/arch, e.g. `godo_<ver>_darwin_arm64` (bare) or the `.tar.gz` / `.zip`
 2. `chmod +x godo` (Unix)
 3. Move it onto your `$PATH`
 4. Check: `godo --version`

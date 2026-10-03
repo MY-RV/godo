@@ -24,7 +24,7 @@ Override Releases API (tests/mirrors): `GODO_RELEASES_API`.
 
 ```bash
 go install github.com/my-rv/godo/cmd/godo@latest
-# pin:
+# pin (v0.3.0 after that tag exists; until then use @v0.2.0 or a preview):
 go install github.com/my-rv/godo/cmd/godo@v0.3.0
 ```
 

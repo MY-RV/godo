@@ -7,8 +7,8 @@ Delete or move to `archive/` after the release ships.
 
 ## godo v0.3.0
 
-Stable. The preview line (`preview.1` / `preview.2`) is promoted: Homebrew,
-Scoop and `godo -e update` carry this release.
+Stable. The preview line (`preview.1` / `preview.2`) is promoted. Homebrew,
+Scoop and `godo -e update` carry this release once the tag is cut.
 
 ### Breaking
 

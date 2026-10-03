@@ -4,9 +4,9 @@
 
 ## [0.3.0] — 2026-10-02
 
-**Stable.** Promotes the `v0.3.0-preview` line. `godo -e update`, Homebrew and
-Scoop carry this release; the previews stay on GitHub for history and are not
-offered as updates.
+**Stable** (notes ready; tag when you cut the release). Promotes the
+`v0.3.0-preview` line. Once tagged, `godo -e update`, Homebrew and Scoop carry
+it; the previews stay on GitHub for history and are not offered as updates.
 
 Breaking: the shell that runs your scripts is the one you are in, not
 `sh -c` / `cmd /C`. File dials move under `engine:` (top-level `dialect:` still

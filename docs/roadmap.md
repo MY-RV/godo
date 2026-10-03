@@ -16,15 +16,15 @@ This is what we **commit to communicate**. Pre-1.0 APIs can still change within 
 
 **Not promised in v0.1:** Homebrew/Scoop installs, dialects `nscript`/`matchns`, stable Go API.
 
-## v0.3 — shipping as `v0.3.0`
+## v0.3 — ready as `v0.3.0`
 
 Breaking: the shell that runs your scripts changes, and file fields move into
 `engine:`. It was held until plugin loading worked — `engine:` without a loader
 is half a promise, and this is the release where the promise gets made.
 
 Previewed as `v0.3.0-preview.1` / `preview.2`. Those stayed GitHub pre-releases
-(`godo -e update`, Homebrew and Scoop never offered them). Stable `v0.3.0`
-is what those channels carry.
+(`godo -e update`, Homebrew and Scoop never offered them). After the stable
+tag, those channels carry `v0.3.0`.
 
 | Promise | |
 |---------|--|
