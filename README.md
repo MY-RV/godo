@@ -34,7 +34,7 @@ _ = godo.NewEngine(cat, nil).PreviewLines([]string{"test"})
 
 ## Docs
 
-[Getting started](./docs/getting-started.md) · [Guides](./docs/README.md) · [Contract](./docs/contract.md) · [Roadmap](./docs/roadmap.md)
+[Getting started](./docs/getting-started.md) · [Plugins](./docs/guide/plugins.md) · [Guides](./docs/README.md) · [Contract](./docs/contract.md) · [Roadmap](./docs/roadmap.md)
 
 ## Develop
 

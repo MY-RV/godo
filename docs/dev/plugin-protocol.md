@@ -181,11 +181,15 @@ release archives.
 
 ## Known limits
 
-- **Local paths only.** `source` is a file on this machine. Fetching belongs
-  with a lockfile and is not built.
+- **Protocol is not frozen in v0.** `api: 1` is what this build speaks. A
+  plugin is pinned by digest, so a protocol change cannot silently break a
+  catalog — it fails by naming the plugin. Authors should exit non-zero on an
+  unexpected major rather than guess.
 - **Size.** A Go plugin carries Go's runtime — the example is ~4.5 MB. TinyGo
   or a C-family language produces far smaller wasm.
 - **One instantiation per step.** Fine at godo's scale; it is not a server.
+- **`provides: dialect:…` is shape only.** The catalog accepts it; nothing
+  loads a dialect from a plugin yet. Runners are what land today.
 - **No spawn.** Filesystem access is limited to the mount and `slink` within
   the catalog. `config` is shaped as sections so more can be added without
   moving anything.

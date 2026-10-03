@@ -26,6 +26,9 @@ godo’s **own** commands go after `-e` / `--engine` (they do not compete with s
 | | |
 |--|--|
 | `-e version` | Binary version |
+| `-e runners` | Runners usable here, and how the default was chosen |
+| `-e plugins` | What the catalog declares, and whether it is installed |
+| `-e plugins install [source]` | Fetch declared plugins, or add and fetch one |
 | `-e update` | Download asset from GitHub Releases |
 | `-e update check` | Report only whether an update is available |
 | `-e help` | Engine help |
@@ -84,7 +87,7 @@ script side growing with it.
 | `version` | Minimum `godo` binary |
 | `dialect` | How keys match tokens. Default `package` |
 | `runner` | How a body becomes a process. Default: the shell you are in |
-| `plugins` | Declared plugins (nothing loads them yet) |
+| `plugins` | Declared plugins; runners they provide are loaded at run time |
 
 ### `engine.version`
 
@@ -124,15 +127,14 @@ rest on a transport anyone on the path can rewrite.
 |-------|--|
 | `source` | Required. An `https://` URL, or a path relative to the `godo.yaml` |
 | `sha256` | **Required.** A plugin is third-party code that runs when someone types `godo test`; without a digest there is nothing to verify it is the code that was reviewed |
-| `provides` | Required. `"<kind>:<name>"` entries, kind being `runner` or `dialect`. Two plugins may not provide the same one |
+| `provides` | Required. `"<kind>:<name>"` entries, kind being `runner` or `dialect`. Two plugins may not provide the same one. **Only `runner` is loaded today** — `dialect` is accepted in the shape so a future dialect plugin does not need a new field, and is otherwise ignored |
 | `config` | Optional, and the plugin's: its keys, its meaning, its defaults. godo carries it across and reads only `fs.mount`, which says which directories the sandbox can see |
 
-A script asking for a runner a plugin provides fails by naming that plugin:
+A remote plugin that is not in the cache fails by naming what to run:
 
 ```
-godo: unknown runner: script "wt" asks for runner "micropy", provided by
-plugin https://github.com/my-rv/godo-micropy@v1.2.0 — this build cannot load
-plugins
+godo: plugin https://github.com/my-rv/godo-micropy@v1.2.0 is not installed
+  run: godo -e plugins install
 ```
 
 `godo -e runners` lists what a catalog declares, beside what the machine has.

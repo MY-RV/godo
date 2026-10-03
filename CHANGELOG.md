@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-02
+
+**Stable.** Promotes the `v0.3.0-preview` line. `godo -e update`, Homebrew and
+Scoop carry this release; the previews stay on GitHub for history and are not
+offered as updates.
+
+Breaking: the shell that runs your scripts is the one you are in, not
+`sh -c` / `cmd /C`. File dials move under `engine:` (top-level `dialect:` still
+works). Plugins load — WASM via wazero, digest-pinned — see
+[plugins](./docs/guide/plugins.md).
+
+The preview was where Windows and the new loader got found out. preview.1 on a
+real Windows host produced three fixes (preview.2); the remaining junction
+syscall behind `fs.slink` has since been confirmed on Windows. Plugin install
+and run are covered by e2e; `package` and `matcher` stay built in.
+
+Everything promised under the preview entries below is what 0.3.0 ships.
+
 ## [0.3.0-preview.2] — 2026-09-21
 
 **A preview**, on the same terms as the one before it: a GitHub pre-release, so
@@ -12,10 +30,8 @@ is what the preview was for. The roadmap said Windows shell detection was
 written from documentation and unverified; it was also wrong, and so were two
 other things.
 
-Still unverified, and the reason this is preview.2 rather than 0.3.0: the
-junction syscall runs only on Windows. Its reparse buffer is built in portable
-code and tested field by field, but `DeviceIoControl` itself has been executed
-by nobody.
+At the time of this preview the junction syscall behind `fs.slink` had been
+run by nobody; that gap closed before 0.3.0.
 
 ### Fixed
 - **Every PowerShell user on Windows was told they were in `cmd`.** Detection

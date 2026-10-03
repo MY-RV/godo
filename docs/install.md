@@ -25,13 +25,13 @@ Override Releases API (tests/mirrors): `GODO_RELEASES_API`.
 ```bash
 go install github.com/my-rv/godo/cmd/godo@latest
 # pin:
-go install github.com/my-rv/godo/cmd/godo@v0.2.0
+go install github.com/my-rv/godo/cmd/godo@v0.3.0
 ```
 
 Local build:
 
 ```bash
-go build -ldflags "-X github.com/my-rv/godo.Version=v0.2.0" -o godo ./cmd/godo
+go build -ldflags "-X github.com/my-rv/godo.Version=v0.3.0" -o godo ./cmd/godo
 ```
 
 ## Preview releases
@@ -44,12 +44,12 @@ arrives on its own — you go and get it:
 go install github.com/my-rv/godo/cmd/godo@v0.3.0-preview.2
 ```
 
-or download the `v0.3.0-preview.2` assets from
+or download the preview assets from
 [Releases](https://github.com/MY-RV/godo/releases).
 
-On a preview binary `godo -e update check` reports no update available: the
-newest release really is older than what you are running. Reinstalling the
-stable line (`brew`, `scoop`, or `@latest`) is how you leave a preview.
+On a preview binary `godo -e update check` reports no update available until a
+newer *release* exists. Reinstalling the stable line (`brew`, `scoop`, or
+`@v0.3.0` / `@latest`) is how you leave a preview.
 
 ## Package managers
 

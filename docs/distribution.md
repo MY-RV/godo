@@ -2,15 +2,17 @@
 
 Package / binary name is always **`godo`**. Module import path stays `github.com/my-rv/godo` (Go is case-sensitive). GitHub owner display is **MY-RV** (same account).
 
-## v0.1 (now)
+## v0.3 (now)
 
 | Channel | How |
 |---------|-----|
 | GitHub Releases | Download bare binary or archive — [install.md](./install.md) |
-| Go | `go install github.com/my-rv/godo/cmd/godo@v0.2.0` |
+| Go | `go install github.com/my-rv/godo/cmd/godo@v0.3.0` |
 | Homebrew (macOS) | `brew install --cask MY-RV/tap/godo` ([tap](https://github.com/MY-RV/homebrew-tap)) |
 | Scoop | `scoop bucket add my-rv https://github.com/MY-RV/scoop-bucket` then `scoop install godo` |
 | Self-update | `godo -e update` / `godo --update-check` |
+
+Preview tags (`*-preview.*`) do not update Homebrew or Scoop.
 
 ## Family packaging
 
